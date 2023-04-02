@@ -1,0 +1,5 @@
+build/
+dist/
+chat_logs/
+chat.spec
+config.ini
