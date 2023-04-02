@@ -9,6 +9,7 @@ import re
 import os
 
 config_filename = "config.ini"
+system_message_default_text = "You are a helpful assistant."
 
 if not os.path.exists(config_filename):
     with open(config_filename, "w") as f:
@@ -93,8 +94,11 @@ def update_chat_file_dropdown(new_file_path):
 def load_chat_history():
     filename = chat_filename_var.get()
     if not filename or filename == "<new-log>":
-        # Show a popup notifying the user that no log is selected
-        messagebox.showwarning("No Log Selected", "Please select a chat log from the dropdown list.")
+        # No file selected? Load default
+        clear_chat_history()
+        system_message_widget.delete("1.0", tk.END)
+        system_message_widget.insert(tk.END, system_message_default_text)
+        add_message("user", "")
         return
 
     filepath = os.path.join("chat_logs", filename)
@@ -250,7 +254,7 @@ main_frame = ttk.Frame(app, padding="10")
 main_frame.grid(row=1, column=0, sticky="nsew")
 
 # System message and model selection
-system_message = tk.StringVar(value="You are a helpful assistant.")
+system_message = tk.StringVar(value=system_message_default_text)
 ttk.Label(main_frame, text="System message:").grid(row=0, column=0, sticky="w")
 system_message_widget = tk.Text(main_frame, wrap=tk.WORD, height=5, width=50)
 system_message_widget.grid(row=0, column=1, sticky="we", pady=3)
