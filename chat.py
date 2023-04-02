@@ -247,7 +247,7 @@ def add_message_via_button():
 # Initialize the main application window
 app = tk.Tk()
 app.geometry("800x600")
-app.title("OpenAI Chat Completions GUI")
+app.title("Chat Completions GUI")
 
 # Create the main_frame for holding the chat and other widgets
 main_frame = ttk.Frame(app, padding="10")

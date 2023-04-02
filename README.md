@@ -2,6 +2,8 @@
 
 This is a simple Graphical User Interface (GUI) application for working with the OpenAI API, allowing you to use OpenAI's Chat Completions (GPT-3.5-turbo and GPT-4) in your local desktop environment.
 
+![Screenshot of Chat Completions GUI](chat_completions_gui.png)
+
 ## Getting Started
 
 ### Prerequisites
