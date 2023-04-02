@@ -41,4 +41,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 This project is not officially affiliated with or endorsed by OpenAI. It is an independent project developed by the Multitude VR team, licensed under the MIT License. The use of the OpenAI API is subject to OpenAI's terms and policies, which can be found at https://www.openai.com/usage-policies/.
 
-Please note that this tool does not collect or store any data, and all data exchanged with the OpenAI API is handled directly by OpenAI. By using this tool, you, as a developer, are responsible for your own actions and for ensuring compliance with OpenAI's terms and policies. We encourage you to review OpenAI's policies and understand the implications of using the API with your own keys.
+Please be aware that this tool does not itself collect or store any data; all data exchanged with the OpenAI API is handled directly by OpenAI. As a developer using this tool, it is your responsibility to ensure compliance with OpenAI's terms and policies. We kindly ask you to review OpenAI's policies and understand the implications of using the API with your own keys.
