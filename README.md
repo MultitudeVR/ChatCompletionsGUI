@@ -13,10 +13,20 @@ This is a simple Graphical User Interface (GUI) application for working with the
 
 ### Installing
 
+There are two methods to install Chat Completions GUI:
+
+#### Method 1: Windows Executable
+
+For Windows users, download the executable file from the [GitHub release page](https://github.com/MultitudeVR/ChatCompletionsGUI/releases/tag/v1.0.0). Simply run the downloaded executable to launch the application.
+
+#### Method 2: Installing from Source
+
 1. Clone the repository:
 
-    `git clone https://github.com/MultitudeVR/ChatCompletionsGUI.git`\
-    `cd ChatCompletionsGUI`
+    ```
+    git clone https://github.com/MultitudeVR/ChatCompletionsGUI.git
+    cd ChatCompletionsGUI
+    ```
 
 2. Install the required packages:
 
@@ -26,7 +36,7 @@ This is a simple Graphical User Interface (GUI) application for working with the
 
     `python chat.py`
 
-4. Enter your OpenAI API key and Organization ID (if applicable) in the configuration fields, and click "Save API Key".
+After installation, enter your OpenAI API key and Organization ID (if applicable) in the configuration fields, and click "Save API Key".
 
 ## Features
 
