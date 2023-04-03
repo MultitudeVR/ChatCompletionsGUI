@@ -15,8 +15,8 @@ This is a simple Graphical User Interface (GUI) application for working with the
 
 1. Clone the repository:
 
-    `git clone https://github.com/yourusername/chat-completions-gui.git`\
-    `cd chat-completions-gui`
+    `git clone https://github.com/MultitudeVR/ChatCompletionsGUI.git`\
+    `cd ChatCompletionsGUI`
 
 2. Install the required packages:
 
