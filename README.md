@@ -19,6 +19,8 @@ There are two methods to install Chat Completions GUI:
 
 For Windows users, download the executable file from the [GitHub release page](https://github.com/MultitudeVR/ChatCompletionsGUI/releases/tag/v1.0.0). Simply run the downloaded executable to launch the application.
 
+Note that application startup time is somewhat slow when running from the .exe (it takes like 10 seconds).
+
 #### Method 2: Installing from Source
 
 1. Clone the repository:
