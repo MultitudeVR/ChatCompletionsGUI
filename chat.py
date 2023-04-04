@@ -251,15 +251,12 @@ def add_message_via_button():
 
 def prompt_paste_from_clipboard(event, entry):
     global previous_focused_widget
-    if(os_name != 'Android'):
-        return
     # Check if the previously focused widget is the same as the clicked one
     if previous_focused_widget != entry:
         clipboard_content = app.clipboard_get()
         if messagebox.askyesno("Paste from Clipboard", f"Do you want to paste the following content from the clipboard?\n\n{clipboard_content}"):
             entry.delete(0, tk.END)
             entry.insert(0, clipboard_content)
-
     previous_focused_widget = entry
 
 def update_previous_focused_widget(event):
@@ -363,9 +360,9 @@ previous_focused_widget = None
 inner_frame.bind("<Configure>", configure_scrollregion)
 app.bind("<Configure>", update_entry_widths)
 
-# Bind events for api/org clipboard prompts
-apikey_entry.bind("<Button-1>", lambda event, entry=apikey_entry: prompt_paste_from_clipboard(event, entry))
-orgid_entry.bind("<Button-1>", lambda event, entry=orgid_entry: prompt_paste_from_clipboard(event, entry))
+if(os_name == 'Android'): # Bind events for api/org clipboard prompts, only in Android
+    apikey_entry.bind("<Button-1>", lambda event, entry=apikey_entry: prompt_paste_from_clipboard(event, entry))
+    orgid_entry.bind("<Button-1>", lambda event, entry=orgid_entry: prompt_paste_from_clipboard(event, entry))
 
 # Bind events for tracking the focused widget
 app.bind_class('Entry', '<FocusOut>', update_previous_focused_widget)
