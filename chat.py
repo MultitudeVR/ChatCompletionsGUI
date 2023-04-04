@@ -7,9 +7,13 @@ from threading import Thread
 import configparser
 import re
 import os
+import platform
 
 config_filename = "config.ini"
 system_message_default_text = "You are a helpful assistant."
+os_name = platform.system()
+if os_name == 'Linux' and "ANDROID_BOOTLOGO" in os.environ:
+	os_name = 'Android'
 
 if not os.path.exists(config_filename):
     with open(config_filename, "w") as f:
@@ -154,9 +158,11 @@ def send_request():
 
 def update_entry_widths(event=None):
     window_width = app.winfo_width()
-    
+    screen_width = app.winfo_screenwidth()
+    dpi = app.winfo_fpixels('1i')
+    scaling_factor = 0.12 * ( 96/dpi)
     # Calculate the new width of the Text widgets based on the window width
-    new_entry_width = int((window_width - 120) * 0.12)
+    new_entry_width = int((window_width - scaling_factor*100) * scaling_factor)
     
     for message in chat_history:
         message["content_widget"].configure(width=new_entry_width)
@@ -261,8 +267,8 @@ system_message_widget.grid(row=0, column=1, sticky="we", pady=3)
 system_message_widget.insert(tk.END, system_message.get())
 
 model_var = tk.StringVar(value="gpt-3.5-turbo")
-ttk.Label(main_frame, text="Model:").grid(row=0, column=2, sticky="ne")
-ttk.OptionMenu(main_frame, model_var, "gpt-3.5-turbo", "gpt-3.5-turbo", "gpt-4").grid(row=0, column=3, sticky="ne")
+ttk.Label(main_frame, text="Model:").grid(row=0, column=6, sticky="ne")
+ttk.OptionMenu(main_frame, model_var, "gpt-3.5-turbo", "gpt-3.5-turbo", "gpt-4").grid(row=0, column=7, sticky="ne")
 
 # Chat frame and scrollbar
 chat_history = []
