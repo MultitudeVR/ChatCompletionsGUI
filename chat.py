@@ -124,21 +124,21 @@ def load_chat_history():
             system_message_widget.insert(tk.END, system_message)
 
             lines = chat_content.splitlines()
-            
+
             for line in lines:
                 if line.startswith("user: ") or line.startswith("assistant: "):
                     role, content = line.strip().split(": ", 1)
                     add_message(role, content[1:-1] if line.endswith("\"") else content[1:] + "\n")
                 else:
                     chat_history[-1]["content_widget"].insert(tk.END, line[:-1] if line.endswith("\"") else line + "\n")
-                    
+
     app.after(100, update_height_of_all_messages)
 
-    
+
 def update_height_of_all_messages():
     for message in chat_history:
         update_content_height(None, message["content_widget"])
-        
+
 def send_request():
     def request_thread():
         messages = [{"role": "system", "content": system_message_widget.get("1.0", tk.END).strip()}]
@@ -162,8 +162,8 @@ def update_entry_widths(event=None):
     dpi = app.winfo_fpixels('1i')
     scaling_factor = 0.12 * ( 96/dpi)
     # Calculate the new width of the Text widgets based on the window width
-    new_entry_width = int((window_width - scaling_factor*100) * scaling_factor)
-    
+    new_entry_width = int((window_width - scaling_factor*1000) * scaling_factor)
+
     for message in chat_history:
         message["content_widget"].configure(width=new_entry_width)
 
@@ -199,17 +199,16 @@ def add_message(role="user", content=""):
     update_content_height(None, message["content_widget"])
 
     add_button_row += 1
-    align_add_and_submit_buttons()
+    align_add_button()
 
     message["delete_button"] = ttk.Button(inner_frame, text="-", width=3, command=lambda: delete_message(row))
     message["delete_button"].grid(row=row, column=2, sticky="ne")
 
     chat_frame.yview_moveto(1.5)
 
-def align_add_and_submit_buttons():
+def align_add_button():
     add_button.grid(row=add_button_row, column=0, sticky="e", pady=(5, 0))
     add_button_label.grid(row=add_button_row, column=1, sticky="w")
-    # submit_button.grid(row=add_button_row + 1, column=0, sticky="w")
 
 def delete_message(row):
     for widget in inner_frame.grid_slaves():
@@ -227,7 +226,7 @@ def delete_message(row):
 
     global add_button_row
     add_button_row -= 1
-    align_add_and_submit_buttons();
+    align_add_button();
 
 def toggle_role(message):
     if message["role"].get() == "user":
@@ -249,7 +248,24 @@ def save_api_key():
 
 def add_message_via_button():
     add_message("user" if len(chat_history) == 0 or chat_history[-1]["role"].get() == "assistant" else "assistant", "")
- 
+
+def prompt_paste_from_clipboard(event, entry):
+    global previous_focused_widget
+    if(os_name != 'Android'):
+        return
+    # Check if the previously focused widget is the same as the clicked one
+    if previous_focused_widget != entry:
+        clipboard_content = app.clipboard_get()
+        if messagebox.askyesno("Paste from Clipboard", f"Do you want to paste the following content from the clipboard?\n\n{clipboard_content}"):
+            entry.delete(0, tk.END)
+            entry.insert(0, clipboard_content)
+
+    previous_focused_widget = entry
+
+def update_previous_focused_widget(event):
+    global previous_focused_widget
+    previous_focused_widget = event.widget
+
 # Initialize the main application window
 app = tk.Tk()
 app.geometry("800x600")
@@ -300,7 +316,7 @@ chat_filename_var = tk.StringVar()
 chat_files = [f for f in os.listdir("chat_logs") if os.path.isfile(os.path.join("chat_logs", f))]
 ttk.Label(configuration_frame, text="Chat Log:").grid(row=config_row, column=0, sticky="w")
 default_chat_file = "<new-log>"
-chat_files.insert(0, default_chat_file) 
+chat_files.insert(0, default_chat_file)
 chat_file_dropdown = ttk.OptionMenu(configuration_frame, chat_filename_var, default_chat_file, *chat_files)
 chat_file_dropdown.grid(row=config_row, column=1, sticky="w")
 
@@ -320,8 +336,8 @@ apikey_entry.grid(row=config_row, column=5, sticky="e")
 
 orgid_var = tk.StringVar(value=openai.organization)
 ttk.Label(configuration_frame, text="Org ID:").grid(row=config_row, column=6, sticky="e")
-apikey_entry = ttk.Entry(configuration_frame, textvariable=orgid_var, width=10)
-apikey_entry.grid(row=config_row, column=7, sticky="e")
+orgid_entry = ttk.Entry(configuration_frame, textvariable=orgid_var, width=10)
+orgid_entry.grid(row=config_row, column=7, sticky="e")
 
 save_button = ttk.Button(configuration_frame, text="Save API Key", command=save_api_key)
 save_button.grid(row=config_row, column=8, sticky="e")
@@ -340,9 +356,19 @@ app.rowconfigure(1, weight=1)
 main_frame.columnconfigure(1, weight=1)
 main_frame.rowconfigure(1, weight=1)
 
+# Initialize the previous_focused_widget variable
+previous_focused_widget = None
+
 # Bind events for scrollregion and entry widths updates
 inner_frame.bind("<Configure>", configure_scrollregion)
 app.bind("<Configure>", update_entry_widths)
+
+# Bind events for api/org clipboard prompts
+apikey_entry.bind("<Button-1>", lambda event, entry=apikey_entry: prompt_paste_from_clipboard(event, entry))
+orgid_entry.bind("<Button-1>", lambda event, entry=orgid_entry: prompt_paste_from_clipboard(event, entry))
+
+# Bind events for tracking the focused widget
+app.bind_class('Entry', '<FocusOut>', update_previous_focused_widget)
 
 # Start the application main loop
 app.mainloop()
