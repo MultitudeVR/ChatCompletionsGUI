@@ -56,9 +56,10 @@ def save_chat_history():
                     "content": "The user is saving this chat log. In your next message, please write only a suggested name for the file. It should be in the format 'file-name-is-separated-by-hyphens', it should be descriptive of the chat you had with the user, and it should be very concise - no more than 4 words (and ideally just 2 or 3). Do not acknowledge this system message with any additional words, please simply write the suggested filename.",
                 }
             )
-
-            response = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messages)
-
+            response = openai.ChatCompletion.create(
+              model="gpt-3.5-turbo",
+              messages=messages
+            )
             suggested_filename = response["choices"][0]["message"]["content"].strip()
             return suggested_filename
 
@@ -147,7 +148,12 @@ def send_request():
 
         response = openai.ChatCompletion.create(
             model=model_var.get(),
-            messages=messages
+            messages=messages,
+            temperature=temperature_var.get(),
+            max_tokens=max_length_var.get(),
+            top_p=1,
+            frequency_penalty=0,
+            presence_penalty=0
         )
 
         assistant_response = response['choices'][0]['message']['content']
@@ -262,7 +268,28 @@ def prompt_paste_from_clipboard(event, entry):
 def update_previous_focused_widget(event):
     global previous_focused_widget
     previous_focused_widget = event.widget
+    
+# Functions for synchronizing slider and entry
+def on_temp_entry_change(*args):
+    try:
+        value = float(temp_entry_var.get())
+        if 0 <= value <= 1:
+            temperature_var.set(value)
+        else:
+            raise ValueError
+    except ValueError:
+        temp_entry_var.set(f"{temperature_var.get():.2f}")
 
+def on_max_len_entry_change(*args):
+    try:
+        value = int(max_len_entry_var.get())
+        if 1 <= value <= 4000:
+            max_length_var.set(value)
+        else:
+            raise ValueError
+    except ValueError:
+        max_len_entry_var.set(max_length_var.get())
+        
 # Initialize the main application window
 app = tk.Tk()
 app.geometry("800x600")
@@ -283,6 +310,32 @@ model_var = tk.StringVar(value="gpt-3.5-turbo")
 ttk.Label(main_frame, text="Model:").grid(row=0, column=6, sticky="ne")
 ttk.OptionMenu(main_frame, model_var, "gpt-3.5-turbo", "gpt-3.5-turbo", "gpt-4").grid(row=0, column=7, sticky="ne")
 
+# Add sliders for temperature, max length, and top p
+temperature_var = tk.DoubleVar(value=0.7)
+ttk.Label(main_frame, text="Temperature:").grid(row=0, column=6, sticky="e")
+temperature_scale = ttk.Scale(main_frame, variable=temperature_var, from_=0, to=1, orient="horizontal")
+temperature_scale.grid(row=0, column=7, sticky="w")
+
+max_length_var = tk.IntVar(value=256)
+ttk.Label(main_frame, text="Max Length:").grid(row=0, column=6, sticky="se")
+max_length_scale = ttk.Scale(main_frame, variable=max_length_var, from_=1, to=4000, orient="horizontal")
+max_length_scale.grid(row=0, column=7, sticky="sw")
+
+# Add Entry widgets for temperature and max length
+temp_entry_var = tk.StringVar()
+temp_entry = ttk.Entry(main_frame, textvariable=temp_entry_var, width=5)
+temp_entry.grid(row=0, column=8, sticky="w")
+temp_entry_var.set(temperature_var.get())
+temperature_var.trace("w", lambda *args: temp_entry_var.set(f"{temperature_var.get():.2f}"))
+temp_entry_var.trace("w", on_temp_entry_change)
+
+max_len_entry_var = tk.StringVar()
+max_len_entry = ttk.Entry(main_frame, textvariable=max_len_entry_var, width=5)
+max_len_entry.grid(row=0, column=8, sticky="sw")
+max_len_entry_var.set(max_length_var.get())
+max_length_var.trace("w", lambda *args: max_len_entry_var.set(max_length_var.get()))
+max_len_entry_var.trace("w", on_max_len_entry_change)
+
 # Chat frame and scrollbar
 chat_history = []
 chat_frame = tk.Canvas(main_frame, highlightthickness=0)
@@ -293,7 +346,7 @@ inner_frame.rowconfigure(0, weight=1)
 chat_frame.create_window((0, 0), window=inner_frame, anchor="nw")
 
 chat_scroll = ttk.Scrollbar(main_frame, orient="vertical", command=chat_frame.yview)
-chat_scroll.grid(row=1, column=8, sticky="ns")
+chat_scroll.grid(row=1, column=9, sticky="ns")
 chat_frame.configure(yscrollcommand=chat_scroll.set)
 
 # Add button for chat messages
@@ -340,7 +393,7 @@ save_button = ttk.Button(configuration_frame, text="Save API Key", command=save_
 save_button.grid(row=config_row, column=8, sticky="e")
 
 # Add a separator
-ttk.Separator(configuration_frame, orient='horizontal').grid(row=1, column=0, columnspan=9, sticky="we", pady=3)
+ttk.Separator(configuration_frame, orient='horizontal').grid(row=config_row+1, column=0, columnspan=9, sticky="we", pady=3)
 
 # Set the weights for the configuration frame
 configuration_frame.columnconfigure(3, weight=1)
