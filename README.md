@@ -46,6 +46,8 @@ After installation, enter your OpenAI API key and Organization ID (if applicable
 - Easily add, edit, and delete chat messages
 - Save and load chat logs
 - Customizable system message and model selection
+- Set temperature and max response length
+- Windows, Mac, Linux, and Android support
 
 ## License
 
