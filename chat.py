@@ -8,6 +8,7 @@ import configparser
 import re
 import os
 import platform
+import asyncio
 
 config_filename = "config.ini"
 system_message_default_text = "You are a helpful assistant."
@@ -146,21 +147,35 @@ def send_request():
         for message in chat_history:
             messages.append({"role": message["role"].get(), "content": message["content_widget"].get("1.0", tk.END).strip()})
 
-        response = openai.ChatCompletion.create(
-            model=model_var.get(),
-            messages=messages,
-            temperature=temperature_var.get(),
-            max_tokens=max_length_var.get(),
-            top_p=1,
-            frequency_penalty=0,
-            presence_penalty=0
-        )
+        async def streaming_chat_completion():
+            async for chunk in await openai.ChatCompletion.acreate(
+                model=model_var.get(),
+                messages=messages,
+                temperature=temperature_var.get(),
+                max_tokens=max_length_var.get(),
+                top_p=1,
+                frequency_penalty=0,
+                presence_penalty=0,
+                stream=True,
+            ):
+                content = chunk["choices"][0].get("delta", {}).get("content")
+                if content is not None:
+                    app.after(0, add_to_last_message, content)
 
-        assistant_response = response['choices'][0]['message']['content']
-        app.after(0, add_message, "assistant", assistant_response)
-        app.after(0, add_message, "user", "")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(streaming_chat_completion())
 
     Thread(target=request_thread).start()
+
+
+def add_to_last_message(content):
+    last_message = chat_history[-1]
+    if last_message["role"].get() == "assistant":
+        last_message["content_widget"].insert(tk.END, content)
+        update_content_height(None, last_message["content_widget"])
+    else:
+        add_message("assistant", content)
 
 def update_entry_widths(event=None):
     window_width = app.winfo_width()
