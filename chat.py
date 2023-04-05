@@ -78,7 +78,7 @@ def save_chat_history():
         return
 
     # Save the chat history to the file
-    with open(file_path, "w") as f:
+    with open(file_path, "w", encoding='utf-8') as f:
         # Add the system message to the beginning of the chat history
         system_message = system_message_widget.get("1.0", tk.END).strip()
         f.write(f"system: \"{system_message}\"\n")
@@ -109,7 +109,7 @@ def load_chat_history():
 
     filepath = os.path.join("chat_logs", filename)
     if os.path.exists(filepath):
-        with open(filepath, "r") as f:
+        with open(filepath, "r", encoding='utf-8') as f:
             content = f.read()
 
         clear_chat_history()
