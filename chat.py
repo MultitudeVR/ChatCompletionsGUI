@@ -141,13 +141,21 @@ def update_height_of_all_messages():
     for message in chat_history:
         update_content_height(None, message["content_widget"])
 
+is_streaming_cancelled = False
+
 def send_request():
+    global is_streaming_cancelled
+    is_streaming_cancelled = False
+    cancel_button.config(state=tk.NORMAL)
+
     def request_thread():
+        global is_streaming_cancelled
         messages = [{"role": "system", "content": system_message_widget.get("1.0", tk.END).strip()}]
         for message in chat_history:
             messages.append({"role": message["role"].get(), "content": message["content_widget"].get("1.0", tk.END).strip()})
 
         async def streaming_chat_completion():
+            global is_streaming_cancelled
             async for chunk in await openai.ChatCompletion.acreate(
                 model=model_var.get(),
                 messages=messages,
@@ -161,13 +169,17 @@ def send_request():
                 content = chunk["choices"][0].get("delta", {}).get("content")
                 if content is not None:
                     app.after(0, add_to_last_message, content)
+                if is_streaming_cancelled:
+                    break
+
+            if not is_streaming_cancelled:
+                app.after(0, add_empty_user_message)
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(streaming_chat_completion())
 
     Thread(target=request_thread).start()
-
 
 def add_to_last_message(content):
     last_message = chat_history[-1]
@@ -177,6 +189,15 @@ def add_to_last_message(content):
     else:
         add_message("assistant", content)
 
+def cancel_streaming():
+    global is_streaming_cancelled
+    is_streaming_cancelled = True
+    cancel_button.config(state=tk.DISABLED)
+
+def add_empty_user_message():
+    add_message("user", "")
+    cancel_button.config(state=tk.DISABLED)
+    
 def update_entry_widths(event=None):
     window_width = app.winfo_width()
     screen_width = app.winfo_screenwidth()
@@ -230,6 +251,7 @@ def add_message(role="user", content=""):
 def align_add_button():
     add_button.grid(row=add_button_row, column=0, sticky="e", pady=(5, 0))
     add_button_label.grid(row=add_button_row, column=1, sticky="w")
+    cancel_button.grid(row=add_button_row, column=1, sticky="e")
 
 def delete_message(row):
     for widget in inner_frame.grid_slaves():
@@ -247,7 +269,8 @@ def delete_message(row):
 
     global add_button_row
     add_button_row -= 1
-    align_add_button();
+    align_add_button()
+    cancel_streaming()
 
 def toggle_role(message):
     if message["role"].get() == "user":
@@ -368,6 +391,10 @@ chat_frame.configure(yscrollcommand=chat_scroll.set)
 add_button_row = 1
 add_button = ttk.Button(inner_frame, text="+", width=3, command=add_message_via_button)
 add_button_label = ttk.Label(inner_frame, text="Add message")
+
+# Add a "cancel" button
+cancel_button = tk.Button(inner_frame, text="Cancel", command=cancel_streaming, state=tk.DISABLED)
+
 # Submit button
 submit_button = ttk.Button(main_frame, text="Submit", command=send_request).grid(row=7, column=7, sticky="e")
 add_message("user", "")
