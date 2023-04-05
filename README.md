@@ -15,13 +15,7 @@ This is a simple Graphical User Interface (GUI) application for working with the
 
 There are two methods to install Chat Completions GUI:
 
-#### Method 1: Windows Executable
-
-For Windows users, download the executable file from the [GitHub release page](https://github.com/MultitudeVR/ChatCompletionsGUI/releases/tag/v1.0.0). Simply run the downloaded executable to launch the application.
-
-Note that application startup time is somewhat slow when running from the .exe (it takes like 10 seconds).
-
-#### Method 2: Installing from Source
+#### Method 1: Installing from Source
 
 1. Clone the repository:
 
@@ -40,13 +34,19 @@ Note that application startup time is somewhat slow when running from the .exe (
 
 After installation, enter your OpenAI API key and Organization ID (if applicable) in the configuration fields, and click "Save API Key".
 
+#### Method 2: Windows Executable
+
+For Windows users, download the executable file from the [GitHub release page](https://github.com/MultitudeVR/ChatCompletionsGUI/releases/tag/v1.0.0). Simply run the downloaded executable to launch the application.
+
+Note that application startup time is somewhat slow when running from the .exe (it takes like 10 seconds).
+
 ## Features
 
 - Interact with GPT-3.5-turbo and GPT-4 models
 - Easily add, edit, and delete chat messages
 - Save and load chat logs
 - Customizable system message and model selection
-- Set temperature and max response length
+- Customizable temperature and max response length
 - Windows, Mac, Linux, and Android support
 
 ## License
