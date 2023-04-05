@@ -8,7 +8,7 @@ This is a simple Graphical User Interface (GUI) application for working with the
 
 ### Prerequisites
 
-- Python 3.7 or higher
+- Python 3.7 or higher (If installing from source)
 - An OpenAI API key (get one from https://beta.openai.com/signup/)
 
 ### Installing
