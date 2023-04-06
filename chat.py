@@ -328,6 +328,35 @@ def on_max_len_entry_change(*args):
     except ValueError:
         max_len_entry_var.set(max_length_var.get())
         
+def toggle_dark_mode():
+    if dark_mode_var.get():
+        app.configure(bg="#2c2c2c")
+        main_frame.configure(style="Dark.TFrame")
+        configuration_frame.configure(style="Dark.TFrame")
+        chat_frame.configure(bg="#2c2c2c") # Change chat_frame background color
+        inner_frame.configure(style="Dark.TFrame")
+        
+        for widget in main_frame.winfo_children():
+            if isinstance(widget, (ttk.Label, ttk.OptionMenu, ttk.Checkbutton)):
+                widget.configure(style="Dark." + widget.winfo_class())
+        for widget in configuration_frame.winfo_children():
+            if isinstance(widget, (ttk.Label, ttk.OptionMenu, ttk.Checkbutton)):
+                widget.configure(style="Dark." + widget.winfo_class())
+
+    else:
+        app.configure(bg=default_bg_color)
+        main_frame.configure(style="")
+        configuration_frame.configure(style="")
+        chat_frame.configure(bg=default_bg_color) # Reset chat_frame background color
+        inner_frame.configure(style="")
+        
+        for widget in main_frame.winfo_children():
+            if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
+                widget.configure(style=widget.winfo_class())
+        for widget in configuration_frame.winfo_children():
+            if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
+                widget.configure(style=widget.winfo_class())
+    
 # Initialize the main application window
 app = tk.Tk()
 app.geometry("800x600")
@@ -433,6 +462,24 @@ orgid_entry.grid(row=config_row, column=7, sticky="e")
 
 save_button = ttk.Button(configuration_frame, text="Save API Key", command=save_api_key)
 save_button.grid(row=config_row, column=8, sticky="e")
+
+dark_mode = False
+# Create a variable for dark mode toggle
+dark_mode_var = tk.BooleanVar()
+dark_mode_var.set(False)
+
+# Create a Checkbutton widget for dark mode toggle
+dark_mode_checkbutton = ttk.Checkbutton(configuration_frame, text="Dark mode", variable=dark_mode_var, command=toggle_dark_mode)
+dark_mode_checkbutton.grid(row=0, column=9, padx=10, pady=10, sticky="w")     
+
+default_bg_color = "SystemButtonFace"
+# Create styles for light and dark modes
+style = ttk.Style(app)
+style.configure("Dark.TFrame", background="#2c2c2c")
+style.configure("Dark.TLabel", background="#2c2c2c", foreground="#ffffff")
+# style.configure("Dark.TButton", background="#2c2c2c", foreground="2c2c2c")
+style.configure("Dark.TOptionMenu", background="#2c2c2c", foreground="#ffffff")
+style.configure("Dark.TCheckbutton", background="#2c2c2c", foreground="#ffffff")
 
 # Add a separator
 ttk.Separator(configuration_frame, orient='horizontal').grid(row=config_row+1, column=0, columnspan=9, sticky="we", pady=3)
