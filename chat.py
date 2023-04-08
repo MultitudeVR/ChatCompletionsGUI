@@ -57,9 +57,10 @@ def save_chat_history():
                     "content": "The user is saving this chat log. In your next message, please write only a suggested name for the file. It should be in the format 'file-name-is-separated-by-hyphens', it should be descriptive of the chat you had with the user, and it should be very concise - no more than 4 words (and ideally just 2 or 3). Do not acknowledge this system message with any additional words, please simply write the suggested filename.",
                 }
             )
+            culled_messages = apply_sliding_context_window(messages, max_tokens=4096)
             response = openai.ChatCompletion.create(
               model="gpt-3.5-turbo",
-              messages=messages
+              messages=culled_messages
             )
             suggested_filename = response["choices"][0]["message"]["content"].strip()
             return suggested_filename
@@ -89,7 +90,36 @@ def save_chat_history():
             f.write(f"{role}: \"{content}\"\n")
 
     update_chat_file_dropdown(file_path)
+    
+def count_tokens(text):
+    return len(text.encode('utf-8')) // 4
 
+def apply_sliding_context_window(messages, max_tokens):
+    tokens_to_keep = max_tokens // 4
+    culled_messages = messages.copy()
+
+    current_tokens = sum(count_tokens(msg["content"]) for msg in culled_messages)
+    tokens_to_remove = current_tokens - max_tokens
+    # print(str(current_tokens) + " " + str(tokens_to_remove))
+    if tokens_to_remove > 0:
+        index_to_start_culling = 0
+        tokens_counted = 0
+        for i, message in enumerate(culled_messages):
+            tokens_counted += count_tokens(message["content"])
+            if tokens_counted >= tokens_to_keep:
+                index_to_start_culling = i
+                break
+
+        while tokens_to_remove > 0 and index_to_start_culling < len(culled_messages):
+            message = culled_messages[index_to_start_culling]
+            message_tokens = count_tokens(message["content"])
+            chars_to_remove = min(tokens_to_remove * 4, message_tokens * 4)
+            culled_messages[index_to_start_culling]["content"] = message["content"][:-chars_to_remove]
+            tokens_to_remove -= (chars_to_remove // 4)
+            index_to_start_culling += 1
+    # print(sum(count_tokens(msg["content"]) for msg in culled_messages))
+    return culled_messages
+    
 def update_chat_file_dropdown(new_file_path):
     new_file_name = os.path.basename(new_file_path)
     if new_file_name not in chat_files:
@@ -153,12 +183,14 @@ def send_request():
         messages = [{"role": "system", "content": system_message_widget.get("1.0", tk.END).strip()}]
         for message in chat_history:
             messages.append({"role": message["role"].get(), "content": message["content_widget"].get("1.0", tk.END).strip()})
-
+        
+        max_tokens_for_context_window = (8192 if model_var.get() == 'gpt-4' else 4096) - max_length_var.get()
+        culled_messages = apply_sliding_context_window(messages, max_tokens=max_tokens_for_context_window)
         async def streaming_chat_completion():
             global is_streaming_cancelled
             async for chunk in await openai.ChatCompletion.acreate(
                 model=model_var.get(),
-                messages=messages,
+                messages=culled_messages,
                 temperature=temperature_var.get(),
                 max_tokens=max_length_var.get(),
                 top_p=1,
