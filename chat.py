@@ -9,6 +9,7 @@ import re
 import os
 import platform
 import asyncio
+from tooltip import ToolTip
 
 config_filename = "config.ini"
 system_message_default_text = "You are a helpful assistant."
@@ -342,7 +343,9 @@ def add_message(role="user", content=""):
 
     message["star_button"] = ttk.Button(inner_frame, text="★", command=lambda: toggle_important(message), width=2)
     message["star_button"].grid(row=row, column=0, sticky="nw")
-
+    tooltip_text = "Mark as important. Important messages are prioritized and less likely to be trimmed when reducing message length."
+    ToolTip(message["star_button"], tooltip_text)
+    
     message["content_widget"] = tk.Text(inner_frame, wrap=tk.WORD, height=1, width=50)
     message["content_widget"].grid(row=row, column=2, sticky="we")
     message["content_widget"].insert(tk.END, content)
@@ -359,7 +362,7 @@ def add_message(role="user", content=""):
 
 def align_add_button():
     add_button.grid(row=add_button_row, column=0, sticky="e", pady=(5, 0))
-    add_button_label.grid(row=add_button_row, column=1, sticky="w")
+    add_button_label.grid(row=add_button_row, column=1, sticky="sw")
 
 def delete_message(row):
     for widget in inner_frame.grid_slaves():
@@ -644,6 +647,7 @@ chat_frame.configure(yscrollcommand=chat_scroll.set)
 add_button_row = 1
 add_button = ttk.Button(inner_frame, text="+", width=2, command=add_message_via_button)
 add_button_label = ttk.Label(inner_frame, text="Add")
+ToolTip(add_button, "Add new message")
 
 # Submit button
 submit_button_text = tk.StringVar()  # Create a StringVar variable to control the text of the submit button
