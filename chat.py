@@ -610,6 +610,8 @@ def show_popup():
     if(os_name == 'Android'):
         apikey_entry.bind("<Button-1>", lambda event, entry=apikey_entry: prompt_paste_from_clipboard(event, entry))
         orgid_entry.bind("<Button-1>", lambda event, entry=orgid_entry: prompt_paste_from_clipboard(event, entry))
+        apikey_entry.bind("<FocusOut>", update_previous_focused_widget)
+        orgid_entry.bind("<FocusOut>", update_previous_focused_widget)
         
     # Center the popup over the main window
     center_popup_over_main_window(popup, app)
