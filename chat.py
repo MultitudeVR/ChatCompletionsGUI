@@ -606,7 +606,11 @@ def show_popup():
     toggle_dark_mode()
     # Bind the on_popup_close function to the WM_DELETE_WINDOW protocol
     popup.protocol("WM_DELETE_WINDOW", on_popup_close)
-
+    # Bind events for api/org clipboard prompts, only in Android
+    if(os_name == 'Android'):
+        apikey_entry.bind("<Button-1>", lambda event, entry=apikey_entry: prompt_paste_from_clipboard(event, entry))
+        orgid_entry.bind("<Button-1>", lambda event, entry=orgid_entry: prompt_paste_from_clipboard(event, entry))
+        
     # Center the popup over the main window
     center_popup_over_main_window(popup, app)
     
@@ -761,10 +765,6 @@ inner_frame.bind("<Configure>", configure_scrollregion)
 app.bind("<Configure>", update_entry_widths)
 app.bind_class('Entry', '<FocusOut>', update_previous_focused_widget)
 app.bind("<Escape>", lambda event: show_popup())
-
-if(os_name == 'Android'): # Bind events for api/org clipboard prompts, only in Android
-    apikey_entry.bind("<Button-1>", lambda event, entry=apikey_entry: prompt_paste_from_clipboard(event, entry))
-    orgid_entry.bind("<Button-1>", lambda event, entry=orgid_entry: prompt_paste_from_clipboard(event, entry))
     
 # Start the application main loop
 app.mainloop()
