@@ -19,6 +19,7 @@ if os_name == 'Linux' and "ANDROID_BOOTLOGO" in os.environ:
 if not os.path.exists(config_filename):
     with open(config_filename, "w") as f:
         f.write("[openai]\n")
+        f.write("[app]\n")
 
 config = configparser.ConfigParser()
 config.read(config_filename)
@@ -407,8 +408,17 @@ def on_max_len_entry_change(*args):
             raise ValueError
     except ValueError:
         max_len_entry_var.set(max_length_var.get())
-        
+    
+def save_dark_mode_state():
+    config.set("app", "dark_mode", str(dark_mode_var.get()))
+    with open(config_filename, "w") as f:
+        config.write(f)
+
+def load_dark_mode_state():
+    return config.getboolean("app", "dark_mode", fallback=False)
+    
 def toggle_dark_mode():
+    global popup_frame
     if dark_mode_var.get():
         app.configure(bg="#2c2c2c")
         main_frame.configure(style="Dark.TFrame")
@@ -422,7 +432,11 @@ def toggle_dark_mode():
         for widget in configuration_frame.winfo_children():
             if isinstance(widget, (ttk.Label, ttk.OptionMenu, ttk.Checkbutton)):
                 widget.configure(style="Dark." + widget.winfo_class())
-
+        if popup_frame is not None:
+            popup_frame.configure(style="Dark.TFrame")
+            for widget in popup_frame.winfo_children():
+                if isinstance(widget, (ttk.Label, ttk.OptionMenu, ttk.Checkbutton)):
+                    widget.configure(style="Dark." + widget.winfo_class())
     else:
         app.configure(bg=default_bg_color)
         main_frame.configure(style="")
@@ -436,6 +450,12 @@ def toggle_dark_mode():
         for widget in configuration_frame.winfo_children():
             if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
                 widget.configure(style=widget.winfo_class())
+        if popup_frame is not None:
+            popup_frame.configure(style="")
+            for widget in popup_frame.winfo_children():
+                if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
+                    widget.configure(style=widget.winfo_class())
+    save_dark_mode_state()
                 
 def get_default_bg_color(root):
     # Create a temporary button widget to get the default background color
@@ -444,6 +464,50 @@ def get_default_bg_color(root):
     # Destroy the temporary button
     temp_button.destroy()
     return default_bg_color
+    
+
+popup = None
+popup_frame = None
+
+def close_popup():
+    global popup
+    if popup is not None:
+        popup.destroy()
+        popup = None
+
+def show_popup():
+    global popup, popup_frame, apikey_var, orgid_var
+    # If the popup already exists, close it and set popup to None
+    if popup is not None:
+        popup.destroy()
+        popup = None
+        return
+        
+    popup = tk.Toplevel(app)
+    popup.title("Settings")
+    popup_frame = ttk.Frame(popup, padding="3")
+    popup_frame.grid(row=0, column=0, sticky="new")
+
+    # Add API key / Org ID configurations
+    ttk.Label(popup_frame, text="API Key:").grid(row=0, column=0, sticky="e")
+    apikey_entry = ttk.Entry(popup_frame, textvariable=apikey_var, width=60)
+    apikey_entry.grid(row=0, column=1, sticky="e")
+
+    ttk.Label(popup_frame, text="Org ID:").grid(row=1, column=0, sticky="e")
+    orgid_entry = ttk.Entry(popup_frame, textvariable=orgid_var, width=60)
+    orgid_entry.grid(row=1, column=1, sticky="e")
+
+    save_button = ttk.Button(popup_frame, text="Save API Key", command=save_api_key)
+    save_button.grid(row=2, column=0, columnspan=2, pady=10)
+
+    # Create a Checkbutton widget for dark mode toggle
+    dark_mode_var.set(load_dark_mode_state())
+    dark_mode_checkbutton = ttk.Checkbutton(popup_frame, text="Dark mode", variable=dark_mode_var, command=toggle_dark_mode)
+    dark_mode_checkbutton.grid(row=3, column=0, columnspan=2, padx=10, pady=10, sticky="w")
+    # Add a button to close the popup
+    close_button = ttk.Button(popup_frame, text="Close", command=close_popup)
+    close_button.grid(row=100, column=0, columnspan=2, pady=10)
+    toggle_dark_mode()
     
 # Initialize the main application window
 app = tk.Tk()
@@ -537,28 +601,12 @@ load_button.grid(row=config_row, column=2, sticky="w")
 save_button = ttk.Button(configuration_frame, text="Save Chat Log", command=save_chat_history)
 save_button.grid(row=config_row, column=3, sticky="w")
 
-# Add API key / Org ID configurations
 apikey_var = tk.StringVar(value=openai.api_key)
-ttk.Label(configuration_frame, text="API Key:").grid(row=config_row, column=4, sticky="e")
-apikey_entry = ttk.Entry(configuration_frame, textvariable=apikey_var, width=10)
-apikey_entry.grid(row=config_row, column=5, sticky="e")
-
 orgid_var = tk.StringVar(value=openai.organization)
-ttk.Label(configuration_frame, text="Org ID:").grid(row=config_row, column=6, sticky="e")
-orgid_entry = ttk.Entry(configuration_frame, textvariable=orgid_var, width=10)
-orgid_entry.grid(row=config_row, column=7, sticky="e")
 
-save_button = ttk.Button(configuration_frame, text="Save API Key", command=save_api_key)
-save_button.grid(row=config_row, column=8, sticky="e")
-
-dark_mode = False
-# Create a variable for dark mode toggle
-dark_mode_var = tk.BooleanVar()
-dark_mode_var.set(False)
-
-# Create a Checkbutton widget for dark mode toggle
-dark_mode_checkbutton = ttk.Checkbutton(configuration_frame, text="Dark mode", variable=dark_mode_var, command=toggle_dark_mode)
-dark_mode_checkbutton.grid(row=0, column=9, padx=10, pady=10, sticky="w")     
+# Create the hamburger menu button and bind it to the show_popup function
+hamburger_button = ttk.Button(configuration_frame, text="≡", command=show_popup)
+hamburger_button.grid(row=config_row, column=9, padx=10, pady=10, sticky="w")
 
 default_bg_color = get_default_bg_color(app)
 # Create styles for light and dark modes
@@ -570,6 +618,11 @@ style.configure("Dark.TOptionMenu", background="#2c2c2c", foreground="#ffffff")
 style.configure("Dark.TCheckbutton", background="#2c2c2c", foreground="#ffffff")
 style.configure("Important.TButton", foreground="gold")
 
+dark_mode_var = tk.BooleanVar()
+if load_dark_mode_state():
+    dark_mode_var.set(True)
+    toggle_dark_mode()
+    
 # Add a separator
 ttk.Separator(configuration_frame, orient='horizontal').grid(row=config_row+1, column=0, columnspan=9, sticky="we", pady=3)
 
@@ -580,23 +633,21 @@ configuration_frame.columnconfigure(3, weight=1)
 app.columnconfigure(0, weight=1)
 app.rowconfigure(0, weight=0)
 app.rowconfigure(1, weight=1)
-
 main_frame.columnconfigure(1, weight=1)
 main_frame.rowconfigure(1, weight=1)
 
 # Initialize the previous_focused_widget variable
 previous_focused_widget = None
 
-# Bind events for scrollregion and entry widths updates
+# Bind events
 inner_frame.bind("<Configure>", configure_scrollregion)
 app.bind("<Configure>", update_entry_widths)
+app.bind_class('Entry', '<FocusOut>', update_previous_focused_widget)
+app.bind("<Escape>", lambda event: show_popup())
 
 if(os_name == 'Android'): # Bind events for api/org clipboard prompts, only in Android
     apikey_entry.bind("<Button-1>", lambda event, entry=apikey_entry: prompt_paste_from_clipboard(event, entry))
     orgid_entry.bind("<Button-1>", lambda event, entry=orgid_entry: prompt_paste_from_clipboard(event, entry))
-
-# Bind events for tracking the focused widget
-app.bind_class('Entry', '<FocusOut>', update_previous_focused_widget)
-
+    
 # Start the application main loop
 app.mainloop()
