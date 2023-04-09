@@ -26,6 +26,8 @@ config.read(config_filename)
 openai.api_key = config.get("openai", "api_key", fallback="insert-key")
 openai.organization = config.get("openai", "organization", fallback="")
 
+is_streaming_cancelled = False
+
 if not os.path.exists("chat_logs"):
     os.makedirs("chat_logs")
 
@@ -40,34 +42,6 @@ def save_chat_history():
 
     if filename == "<new-log>":
         # Get a file name suggestion from the API
-        def request_file_name():
-            messages = [
-                {"role": "system", "content": system_message_widget.get("1.0", tk.END).strip()}
-            ]
-            for message in chat_history:
-                messages.append(
-                    {
-                        "role": message["role"].get(),
-                        "content": message["content_widget"].get("1.0", tk.END).strip(),
-                        "important": message["important"].get()
-                    }
-                )
-            messages.append(
-                {
-                    "role": "system",
-                    "content": "The user is saving this chat log. In your next message, please write only a suggested name for the file. It should be in the format 'file-name-is-separated-by-hyphens', it should be descriptive of the chat you had with the user, and it should be very concise - no more than 4 words (and ideally just 2 or 3). Do not acknowledge this system message with any additional words, please simply write the suggested filename.",
-                    "important": True
-                }
-            )
-            culled_messages = apply_sliding_context_window(messages, max_tokens=4096)
-            api_ready_messages = remove_unsupported_keys(culled_messages)
-            response = openai.ChatCompletion.create(
-              model="gpt-3.5-turbo",
-              messages=api_ready_messages
-            )
-            suggested_filename = response["choices"][0]["message"]["content"].strip()
-            return suggested_filename
-
         suggested_filename = request_file_name()
         file_path = filedialog.asksaveasfilename(
             defaultextension=".txt", initialdir="chat_logs", initialfile=suggested_filename, title="Save Chat Log"
@@ -98,11 +72,10 @@ def count_tokens(text):
     return len(text.encode('utf-8')) // 4
 
 def remove_unsupported_keys(messages):
-    messages_copy = messages.copy()
-    for message in messages_copy:
+    for message in messages:
         if "important" in message:
             del message["important"]
-    return messages_copy
+    return messages
     
 def apply_sliding_context_window(messages, max_tokens):
     tokens_to_keep = max_tokens // 3
@@ -153,8 +126,79 @@ def apply_sliding_context_window(messages, max_tokens):
                 if(tokens_to_remove) <= 0:
                     break;
     print(sum(count_tokens(msg["content"]) for msg in culled_messages))
+    
     return culled_messages
     
+def get_messages_from_chat_history():
+    messages = [
+        {"role": "system", "content": system_message_widget.get("1.0", tk.END).strip()}
+    ]
+    for message in chat_history:
+        messages.append(
+            {
+                "role": message["role"].get(),
+                "content": message["content_widget"].get("1.0", tk.END).strip(),
+                "important": message["important"].get()
+            }
+        )
+    return messages
+    
+def request_file_name():
+    messages = get_messages_from_chat_history()
+    messages.append(
+        {
+            "role": "system",
+            "content": "The user is saving this chat log. In your next message, please write only a suggested name for the file. It should be in the format 'file-name-is-separated-by-hyphens', it should be descriptive of the chat you had with the user, and it should be very concise - no more than 4 words (and ideally just 2 or 3). Do not acknowledge this system message with any additional words, please simply write the suggested filename.",
+            "important": True
+        }
+    )
+    culled_messages = apply_sliding_context_window(messages, max_tokens=4096)
+    remove_unsupported_keys(culled_messages)
+    response = openai.ChatCompletion.create(
+      model="gpt-3.5-turbo",
+      messages=culled_messages
+    )
+    suggested_filename = response["choices"][0]["message"]["content"].strip()
+    return suggested_filename
+
+def send_request():
+    global is_streaming_cancelled
+    is_streaming_cancelled = False
+    cancel_button.config(state=tk.NORMAL)
+
+    def request_thread():
+        global is_streaming_cancelled
+        messages = get_messages_from_chat_history()
+        max_tokens_for_context_window = (8192 if model_var.get() == 'gpt-4' else 4096) - max_length_var.get()
+        culled_messages = apply_sliding_context_window(messages, max_tokens=max_tokens_for_context_window)
+        remove_unsupported_keys(culled_messages)
+        async def streaming_chat_completion():
+            global is_streaming_cancelled
+            async for chunk in await openai.ChatCompletion.acreate(
+                model=model_var.get(),
+                messages=culled_messages,
+                temperature=temperature_var.get(),
+                max_tokens=max_length_var.get(),
+                top_p=1,
+                frequency_penalty=0,
+                presence_penalty=0,
+                stream=True,
+            ):
+                content = chunk["choices"][0].get("delta", {}).get("content")
+                if content is not None:
+                    app.after(0, add_to_last_message, content)
+                if is_streaming_cancelled:
+                    break
+
+            if not is_streaming_cancelled:
+                app.after(0, add_empty_user_message)
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(streaming_chat_completion())
+
+    Thread(target=request_thread).start()
+  
 def update_chat_file_dropdown(new_file_path):
     new_file_name = os.path.basename(new_file_path)
     if new_file_name not in chat_files:
@@ -205,49 +249,6 @@ def load_chat_history():
 def update_height_of_all_messages():
     for message in chat_history:
         update_content_height(None, message["content_widget"])
-
-is_streaming_cancelled = False
-
-def send_request():
-    global is_streaming_cancelled
-    is_streaming_cancelled = False
-    cancel_button.config(state=tk.NORMAL)
-
-    def request_thread():
-        global is_streaming_cancelled
-        messages = [{"role": "system", "content": system_message_widget.get("1.0", tk.END).strip()}]
-        for message in chat_history:
-            messages.append({"role": message["role"].get(), "content": message["content_widget"].get("1.0", tk.END).strip(), "important": message["important"].get()})
-        
-        max_tokens_for_context_window = (8192 if model_var.get() == 'gpt-4' else 4096) - max_length_var.get()
-        culled_messages = apply_sliding_context_window(messages, max_tokens=max_tokens_for_context_window)
-        api_ready_messages = remove_unsupported_keys(culled_messages)
-        async def streaming_chat_completion():
-            global is_streaming_cancelled
-            async for chunk in await openai.ChatCompletion.acreate(
-                model=model_var.get(),
-                messages=api_ready_messages,
-                temperature=temperature_var.get(),
-                max_tokens=max_length_var.get(),
-                top_p=1,
-                frequency_penalty=0,
-                presence_penalty=0,
-                stream=True,
-            ):
-                content = chunk["choices"][0].get("delta", {}).get("content")
-                if content is not None:
-                    app.after(0, add_to_last_message, content)
-                if is_streaming_cancelled:
-                    break
-
-            if not is_streaming_cancelled:
-                app.after(0, add_empty_user_message)
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(streaming_chat_completion())
-
-    Thread(target=request_thread).start()
 
 def add_to_last_message(content):
     last_message = chat_history[-1]
