@@ -183,8 +183,8 @@ def show_error_and_open_settings(message):
 def send_request():
     global is_streaming_cancelled
     is_streaming_cancelled = False
-    cancel_button.config(state=tk.NORMAL)
-
+    set_submit_button(False)
+    
     def request_thread():
         global is_streaming_cancelled
         messages = get_messages_from_chat_history()
@@ -290,11 +290,11 @@ def add_to_last_message(content):
 def cancel_streaming():
     global is_streaming_cancelled
     is_streaming_cancelled = True
-    cancel_button.config(state=tk.DISABLED)
+    set_submit_button(True)
 
 def add_empty_user_message():
     add_message("user", "")
-    cancel_button.config(state=tk.DISABLED)
+    set_submit_button(True)
     
 def update_entry_widths(event=None):
     window_width = app.winfo_width()
@@ -360,7 +360,6 @@ def add_message(role="user", content=""):
 def align_add_button():
     add_button.grid(row=add_button_row, column=0, sticky="e", pady=(5, 0))
     add_button_label.grid(row=add_button_row, column=1, sticky="w")
-    cancel_button.grid(row=add_button_row, column=2, sticky="e")
 
 def delete_message(row):
     for widget in inner_frame.grid_slaves():
@@ -572,6 +571,14 @@ def show_popup():
     
     popup.focus_force()
     
+def set_submit_button(active):
+    if active:
+        submit_button_text.set("Submit")
+        submit_button.configure(command=send_request)
+    else:
+        submit_button_text.set("Cancel")
+        submit_button.configure(command=cancel_streaming)
+        
 # Initialize the main application window
 app = tk.Tk()
 app.geometry("800x600")
@@ -638,11 +645,12 @@ add_button_row = 1
 add_button = ttk.Button(inner_frame, text="+", width=2, command=add_message_via_button)
 add_button_label = ttk.Label(inner_frame, text="Add")
 
-# Add a "cancel" button
-cancel_button = tk.Button(inner_frame, text="Cancel", command=cancel_streaming, state=tk.DISABLED)
-
 # Submit button
-submit_button = ttk.Button(main_frame, text="Submit", command=send_request).grid(row=7, column=7, sticky="e")
+submit_button_text = tk.StringVar()  # Create a StringVar variable to control the text of the submit button
+submit_button_text.set("Submit")  # Set the initial text of the submit button to "Submit"
+submit_button = ttk.Button(main_frame, textvariable=submit_button_text, command=send_request)  # Use textvariable instead of text
+submit_button.grid(row=7, column=7, sticky="e")
+
 add_message("user", "")
 
 # Configuration frame for API key, Org ID, and buttons
