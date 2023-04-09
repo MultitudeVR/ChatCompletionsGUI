@@ -38,7 +38,7 @@ After installation, enter your OpenAI API key and Organization ID (if applicable
 
 For Windows users, download the executable file from the [GitHub release page](https://github.com/MultitudeVR/ChatCompletionsGUI/releases/tag/v1.0.0). Simply run the downloaded executable to launch the application.
 
-Note that application startup time is somewhat slow when running from the .exe (it takes like 10 seconds).
+Note that application startup time is somewhat slow when running from the .exe (it takes approximately 10 seconds).
 
 ## Features
 
@@ -48,6 +48,16 @@ Note that application startup time is somewhat slow when running from the .exe (
 - Customizable system message and model selection
 - Customizable temperature and max response length
 - Windows, Mac, Linux, and Android support
+
+## Latest Changes
+
+- Support for Unicode added
+- Dark mode added
+- Sliding context window implementation (with 'important' message toggle to keep marked messages in context)
+- Certain settings moved into their own popup window
+- User-visible error message added when API key or Org ID are not configured correctly
+- 'Cancel' and 'submit' buttons consolidated into one button
+- Tooltips implemented for some buttons
 
 ## License
 
