@@ -34,7 +34,7 @@ def clear_chat_history():
         delete_message(row + 1)
 
     chat_history.clear()
-
+    
 def save_chat_history():
     filename = chat_filename_var.get()
 
@@ -49,18 +49,21 @@ def save_chat_history():
                     {
                         "role": message["role"].get(),
                         "content": message["content_widget"].get("1.0", tk.END).strip(),
+                        "important": message["important"].get()
                     }
                 )
             messages.append(
                 {
                     "role": "system",
                     "content": "The user is saving this chat log. In your next message, please write only a suggested name for the file. It should be in the format 'file-name-is-separated-by-hyphens', it should be descriptive of the chat you had with the user, and it should be very concise - no more than 4 words (and ideally just 2 or 3). Do not acknowledge this system message with any additional words, please simply write the suggested filename.",
+                    "important": True
                 }
             )
             culled_messages = apply_sliding_context_window(messages, max_tokens=4096)
+            api_ready_messages = remove_unsupported_keys(culled_messages)
             response = openai.ChatCompletion.create(
               model="gpt-3.5-turbo",
-              messages=culled_messages
+              messages=api_ready_messages
             )
             suggested_filename = response["choices"][0]["message"]["content"].strip()
             return suggested_filename
@@ -94,13 +97,21 @@ def save_chat_history():
 def count_tokens(text):
     return len(text.encode('utf-8')) // 4
 
+def remove_unsupported_keys(messages):
+    messages_copy = messages.copy()
+    for message in messages_copy:
+        if "important" in message:
+            del message["important"]
+    return messages_copy
+    
 def apply_sliding_context_window(messages, max_tokens):
-    tokens_to_keep = max_tokens // 4
+    tokens_to_keep = max_tokens // 3
     culled_messages = messages.copy()
 
     current_tokens = sum(count_tokens(msg["content"]) for msg in culled_messages)
     tokens_to_remove = current_tokens - max_tokens
-    # print(str(current_tokens) + " " + str(tokens_to_remove))
+    print(str(current_tokens) + " " + str(tokens_to_remove))
+
     if tokens_to_remove > 0:
         index_to_start_culling = 0
         tokens_counted = 0
@@ -108,16 +119,40 @@ def apply_sliding_context_window(messages, max_tokens):
             tokens_counted += count_tokens(message["content"])
             if tokens_counted >= tokens_to_keep:
                 index_to_start_culling = i
+                print(index_to_start_culling)
                 break
 
-        while tokens_to_remove > 0 and index_to_start_culling < len(culled_messages):
-            message = culled_messages[index_to_start_culling]
-            message_tokens = count_tokens(message["content"])
-            chars_to_remove = min(tokens_to_remove * 4, message_tokens * 4)
-            culled_messages[index_to_start_culling]["content"] = message["content"][:-chars_to_remove]
-            tokens_to_remove -= (chars_to_remove // 4)
-            index_to_start_culling += 1
-    # print(sum(count_tokens(msg["content"]) for msg in culled_messages))
+        # First loop: Cull only unimportant messages
+        for i in range(index_to_start_culling, len(culled_messages)):
+            message = culled_messages[i]
+            important = message.get("important", False)
+
+            if not important:
+                print("index: " + str(i))
+                message_tokens = count_tokens(message["content"])
+                chars_to_remove = min(tokens_to_remove * 4, message_tokens * 4)
+                culled_messages[i]["content"] = message["content"][:-chars_to_remove]
+                print(culled_messages[i]["content"])
+                tokens_to_remove -= (chars_to_remove // 4)
+            if(tokens_to_remove) <= 0:
+                break;
+
+        # Second loop: Cull important messages if necessary
+        if tokens_to_remove > 0:
+            for i in range(index_to_start_culling, len(culled_messages)):
+                print("index (important): " + str(i))
+                message = culled_messages[i]
+                if message.get("role") == "system":
+                    print("skipping system")
+                    continue
+                message_tokens = count_tokens(message["content"])
+                chars_to_remove = min(tokens_to_remove * 4, message_tokens * 4)
+                culled_messages[i]["content"] = message["content"][:-chars_to_remove]
+                print(culled_messages[i]["content"])
+                tokens_to_remove -= (chars_to_remove // 4)
+                if(tokens_to_remove) <= 0:
+                    break;
+    print(sum(count_tokens(msg["content"]) for msg in culled_messages))
     return culled_messages
     
 def update_chat_file_dropdown(new_file_path):
@@ -182,15 +217,16 @@ def send_request():
         global is_streaming_cancelled
         messages = [{"role": "system", "content": system_message_widget.get("1.0", tk.END).strip()}]
         for message in chat_history:
-            messages.append({"role": message["role"].get(), "content": message["content_widget"].get("1.0", tk.END).strip()})
+            messages.append({"role": message["role"].get(), "content": message["content_widget"].get("1.0", tk.END).strip(), "important": message["important"].get()})
         
         max_tokens_for_context_window = (8192 if model_var.get() == 'gpt-4' else 4096) - max_length_var.get()
         culled_messages = apply_sliding_context_window(messages, max_tokens=max_tokens_for_context_window)
+        api_ready_messages = remove_unsupported_keys(culled_messages)
         async def streaming_chat_completion():
             global is_streaming_cancelled
             async for chunk in await openai.ChatCompletion.acreate(
                 model=model_var.get(),
-                messages=culled_messages,
+                messages=api_ready_messages,
                 temperature=temperature_var.get(),
                 max_tokens=max_length_var.get(),
                 top_p=1,
@@ -253,21 +289,32 @@ def update_content_height(event, content_widget):
             line_length = len(line)
             wrapped_lines += -(-line_length // widget_width)  # Equivalent to math.ceil(line_length / widget_width)
     content_widget.configure(height=wrapped_lines)
-
+    
+def toggle_important(message):
+    message["important"].set(not message["important"].get())
+    if message["important"].get():
+        message["star_button"].config(style="Important.TButton")
+    else:
+        message["star_button"].config(style="")
+        
 def add_message(role="user", content=""):
     global add_button_row
     message = {
         "role": tk.StringVar(value=role),
-        "content": tk.StringVar(value=content)
+        "content": tk.StringVar(value=content),
+        "important": tk.BooleanVar(value=False)
     }
     chat_history.append(message)
 
     row = len(chat_history)
-    message["role_button"] = ttk.Button(inner_frame, textvariable=message["role"], command=lambda: toggle_role(message))
-    message["role_button"].grid(row=row, column=0, sticky="w")
+    message["role_button"] = ttk.Button(inner_frame, textvariable=message["role"], command=lambda: toggle_role(message), width=8)
+    message["role_button"].grid(row=row, column=1, sticky="nw")
+
+    message["star_button"] = ttk.Button(inner_frame, text="★", command=lambda: toggle_important(message), width=2)
+    message["star_button"].grid(row=row, column=0, sticky="nw")
 
     message["content_widget"] = tk.Text(inner_frame, wrap=tk.WORD, height=1, width=50)
-    message["content_widget"].grid(row=row, column=1, sticky="we")
+    message["content_widget"].grid(row=row, column=2, sticky="we")
     message["content_widget"].insert(tk.END, content)
     message["content_widget"].bind("<KeyRelease>", lambda event, content_widget=message["content_widget"]: update_content_height(event, content_widget))
     update_content_height(None, message["content_widget"])
@@ -276,14 +323,14 @@ def add_message(role="user", content=""):
     align_add_button()
 
     message["delete_button"] = ttk.Button(inner_frame, text="-", width=3, command=lambda: delete_message(row))
-    message["delete_button"].grid(row=row, column=2, sticky="ne")
+    message["delete_button"].grid(row=row, column=3, sticky="ne")
 
     chat_frame.yview_moveto(1.5)
 
 def align_add_button():
     add_button.grid(row=add_button_row, column=0, sticky="e", pady=(5, 0))
     add_button_label.grid(row=add_button_row, column=1, sticky="w")
-    cancel_button.grid(row=add_button_row, column=1, sticky="e")
+    cancel_button.grid(row=add_button_row, column=2, sticky="e")
 
 def delete_message(row):
     for widget in inner_frame.grid_slaves():
@@ -450,8 +497,8 @@ chat_frame.configure(yscrollcommand=chat_scroll.set)
 
 # Add button for chat messages
 add_button_row = 1
-add_button = ttk.Button(inner_frame, text="+", width=3, command=add_message_via_button)
-add_button_label = ttk.Label(inner_frame, text="Add message")
+add_button = ttk.Button(inner_frame, text="+", width=2, command=add_message_via_button)
+add_button_label = ttk.Label(inner_frame, text="Add")
 
 # Add a "cancel" button
 cancel_button = tk.Button(inner_frame, text="Cancel", command=cancel_streaming, state=tk.DISABLED)
@@ -512,6 +559,7 @@ style.configure("Dark.TLabel", background="#2c2c2c", foreground="#ffffff")
 # style.configure("Dark.TButton", background="#2c2c2c", foreground="2c2c2c")
 style.configure("Dark.TOptionMenu", background="#2c2c2c", foreground="#ffffff")
 style.configure("Dark.TCheckbutton", background="#2c2c2c", foreground="#ffffff")
+style.configure("Important.TButton", foreground="gold")
 
 # Add a separator
 ttk.Separator(configuration_frame, orient='horizontal').grid(row=config_row+1, column=0, columnspan=9, sticky="we", pady=3)
