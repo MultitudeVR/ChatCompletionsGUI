@@ -161,7 +161,17 @@ def request_file_name():
     )
     suggested_filename = response["choices"][0]["message"]["content"].strip()
     return suggested_filename
+    
+def show_error_popup(message):
+    error_popup = tk.Toplevel(app)
+    error_popup.title("Error")
+    error_popup.geometry("350x100")
 
+    error_label = ttk.Label(error_popup, text=message, wraplength=300)
+    error_label.pack(padx=20, pady=20)
+
+    error_popup.focus_force()
+    
 def send_request():
     global is_streaming_cancelled
     is_streaming_cancelled = False
@@ -175,21 +185,32 @@ def send_request():
         remove_unsupported_keys(culled_messages)
         async def streaming_chat_completion():
             global is_streaming_cancelled
-            async for chunk in await openai.ChatCompletion.acreate(
-                model=model_var.get(),
-                messages=culled_messages,
-                temperature=temperature_var.get(),
-                max_tokens=max_length_var.get(),
-                top_p=1,
-                frequency_penalty=0,
-                presence_penalty=0,
-                stream=True,
-            ):
-                content = chunk["choices"][0].get("delta", {}).get("content")
-                if content is not None:
-                    app.after(0, add_to_last_message, content)
-                if is_streaming_cancelled:
-                    break
+            try:
+                async for chunk in await openai.ChatCompletion.acreate(
+                    model=model_var.get(),
+                    messages=culled_messages,
+                    temperature=temperature_var.get(),
+                    max_tokens=max_length_var.get(),
+                    top_p=1,
+                    frequency_penalty=0,
+                    presence_penalty=0,
+                    stream=True,
+                ):
+                    content = chunk["choices"][0].get("delta", {}).get("content")
+                    if content is not None:
+                        app.after(0, add_to_last_message, content)
+                    if is_streaming_cancelled:
+                        break
+            except openai.error.AuthenticationError as e:
+                if "Incorrect API key" in str(e):
+                    error_message = "API key is incorrect, please configure it in the settings."
+                elif "No such organization" in str(e):
+                    error_message = "Organization not found, please configure it in the settings."
+                loop.call_soon_threadsafe(show_error_popup, error_message)
+                loop.call_soon_threadsafe(show_popup)
+            except Exception as e:
+                error_message = f"An unexpected error occurred: {e}"
+                loop.call_soon_threadsafe(show_error_popup, error_message)
 
             if not is_streaming_cancelled:
                 app.after(0, add_empty_user_message)
@@ -408,6 +429,13 @@ def on_max_len_entry_change(*args):
             raise ValueError
     except ValueError:
         max_len_entry_var.set(max_length_var.get())
+
+def add_app_section_to_config_if_not_present():
+    if not config.has_section("app"):
+        config.add_section("app")
+        config.set("app", "dark_mode", "False")
+        with open(config_filename, "w") as f:
+            config.write(f)
     
 def save_dark_mode_state():
     config.set("app", "dark_mode", str(dark_mode_var.get()))
@@ -497,7 +525,7 @@ def show_popup():
     orgid_entry = ttk.Entry(popup_frame, textvariable=orgid_var, width=60)
     orgid_entry.grid(row=1, column=1, sticky="e")
 
-    save_button = ttk.Button(popup_frame, text="Save API Key", command=save_api_key)
+    save_button = ttk.Button(popup_frame, text="Save API Keys", command=save_api_key)
     save_button.grid(row=2, column=0, columnspan=2, pady=10)
 
     # Create a Checkbutton widget for dark mode toggle
@@ -513,6 +541,8 @@ def show_popup():
 app = tk.Tk()
 app.geometry("800x600")
 app.title("Chat Completions GUI")
+
+add_app_section_to_config_if_not_present();
 
 # Create the main_frame for holding the chat and other widgets
 main_frame = ttk.Frame(app, padding="10")
