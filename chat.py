@@ -171,7 +171,15 @@ def show_error_popup(message):
     error_label.pack(padx=20, pady=20)
 
     error_popup.focus_force()
-    
+    center_popup_over_main_window(error_popup, app, 0, -150)
+
+def show_error_and_open_settings(message):
+    if popup is not None:
+        popup.focus_force()
+    else:
+        show_popup()
+    show_error_popup(message)
+ 
 def send_request():
     global is_streaming_cancelled
     is_streaming_cancelled = False
@@ -206,8 +214,7 @@ def send_request():
                     error_message = "API key is incorrect, please configure it in the settings."
                 elif "No such organization" in str(e):
                     error_message = "Organization not found, please configure it in the settings."
-                loop.call_soon_threadsafe(show_error_popup, error_message)
-                loop.call_soon_threadsafe(show_popup)
+                loop.call_soon_threadsafe(show_error_and_open_settings, error_message)
             except Exception as e:
                 error_message = f"An unexpected error occurred: {e}"
                 loop.call_soon_threadsafe(show_error_popup, error_message)
@@ -511,7 +518,7 @@ def close_popup():
         popup.destroy()
         popup = None
         
-def center_popup_over_main_window(popup, main_window):
+def center_popup_over_main_window(popup_window, main_window, x_offset=0, y_offset=0):
     main_window.update_idletasks()
 
     main_window_width = main_window.winfo_width()
@@ -519,13 +526,13 @@ def center_popup_over_main_window(popup, main_window):
     main_window_x = main_window.winfo_rootx()
     main_window_y = main_window.winfo_rooty()
 
-    popup_width = popup.winfo_reqwidth()
-    popup_height = popup.winfo_reqheight()
+    popup_width = popup_window.winfo_reqwidth()
+    popup_height = popup_window.winfo_reqheight()
 
-    x_position = main_window_x + (main_window_width // 2) - (popup_width // 2)
-    y_position = main_window_y + (main_window_height // 2) - (popup_height // 2)
+    x_position = main_window_x + (main_window_width // 2) - (popup_width // 2) + x_offset
+    y_position = main_window_y + (main_window_height // 2) - (popup_height // 2) + y_offset
 
-    popup.geometry(f"+{x_position}+{y_position}")
+    popup_window.geometry(f"+{x_position}+{y_position}")
     
 def show_popup():
     global popup, popup_frame, apikey_var, orgid_var
@@ -562,6 +569,8 @@ def show_popup():
 
     # Center the popup over the main window
     center_popup_over_main_window(popup, app)
+    
+    popup.focus_force()
     
 # Initialize the main application window
 app = tk.Tk()
