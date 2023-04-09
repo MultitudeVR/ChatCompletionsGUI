@@ -497,12 +497,14 @@ def get_default_bg_color(root):
 popup = None
 popup_frame = None
 
+def on_config_changed(*args):
+    save_api_key()
+    
 def close_popup():
     global popup
     if popup is not None:
         popup.destroy()
         popup = None
-
 def show_popup():
     global popup, popup_frame, apikey_var, orgid_var
     # If the popup already exists, close it and set popup to None
@@ -524,9 +526,6 @@ def show_popup():
     ttk.Label(popup_frame, text="Org ID:").grid(row=1, column=0, sticky="e")
     orgid_entry = ttk.Entry(popup_frame, textvariable=orgid_var, width=60)
     orgid_entry.grid(row=1, column=1, sticky="e")
-
-    save_button = ttk.Button(popup_frame, text="Save API Keys", command=save_api_key)
-    save_button.grid(row=2, column=0, columnspan=2, pady=10)
 
     # Create a Checkbutton widget for dark mode toggle
     dark_mode_var.set(load_dark_mode_state())
@@ -624,15 +623,17 @@ chat_file_dropdown = ttk.OptionMenu(configuration_frame, chat_filename_var, defa
 chat_file_dropdown.grid(row=config_row, column=1, sticky="w")
 
 # Add a button to load the selected chat log
-load_button = ttk.Button(configuration_frame, text="Load Chat Log", command=load_chat_history)
+load_button = ttk.Button(configuration_frame, text="Load Chat", command=load_chat_history)
 load_button.grid(row=config_row, column=2, sticky="w")
 
 # Add a button to save the chat history
-save_button = ttk.Button(configuration_frame, text="Save Chat Log", command=save_chat_history)
+save_button = ttk.Button(configuration_frame, text="Save Chat", command=save_chat_history)
 save_button.grid(row=config_row, column=3, sticky="w")
 
 apikey_var = tk.StringVar(value=openai.api_key)
 orgid_var = tk.StringVar(value=openai.organization)
+apikey_var.trace("w", on_config_changed)
+orgid_var.trace("w", on_config_changed)
 
 # Create the hamburger menu button and bind it to the show_popup function
 hamburger_button = ttk.Button(configuration_frame, text="≡", command=show_popup)
