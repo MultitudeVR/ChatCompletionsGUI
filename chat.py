@@ -436,6 +436,14 @@ def toggle_dark_mode():
         for widget in configuration_frame.winfo_children():
             if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
                 widget.configure(style=widget.winfo_class())
+                
+def get_default_bg_color(root):
+    # Create a temporary button widget to get the default background color
+    temp_button = tk.Button(root)
+    default_bg_color = temp_button.cget('bg')
+    # Destroy the temporary button
+    temp_button.destroy()
+    return default_bg_color
     
 # Initialize the main application window
 app = tk.Tk()
@@ -552,7 +560,7 @@ dark_mode_var.set(False)
 dark_mode_checkbutton = ttk.Checkbutton(configuration_frame, text="Dark mode", variable=dark_mode_var, command=toggle_dark_mode)
 dark_mode_checkbutton.grid(row=0, column=9, padx=10, pady=10, sticky="w")     
 
-default_bg_color = "SystemButtonFace"
+default_bg_color = get_default_bg_color(app)
 # Create styles for light and dark modes
 style = ttk.Style(app)
 style.configure("Dark.TFrame", background="#2c2c2c")
