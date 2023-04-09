@@ -500,11 +500,33 @@ popup_frame = None
 def on_config_changed(*args):
     save_api_key()
     
+def on_popup_close():
+    global popup
+    popup.destroy()
+    popup = None
+
 def close_popup():
     global popup
     if popup is not None:
         popup.destroy()
         popup = None
+        
+def center_popup_over_main_window(popup, main_window):
+    main_window.update_idletasks()
+
+    main_window_width = main_window.winfo_width()
+    main_window_height = main_window.winfo_height()
+    main_window_x = main_window.winfo_rootx()
+    main_window_y = main_window.winfo_rooty()
+
+    popup_width = popup.winfo_reqwidth()
+    popup_height = popup.winfo_reqheight()
+
+    x_position = main_window_x + (main_window_width // 2) - (popup_width // 2)
+    y_position = main_window_y + (main_window_height // 2) - (popup_height // 2)
+
+    popup.geometry(f"+{x_position}+{y_position}")
+    
 def show_popup():
     global popup, popup_frame, apikey_var, orgid_var
     # If the popup already exists, close it and set popup to None
@@ -535,6 +557,11 @@ def show_popup():
     close_button = ttk.Button(popup_frame, text="Close", command=close_popup)
     close_button.grid(row=100, column=0, columnspan=2, pady=10)
     toggle_dark_mode()
+    # Bind the on_popup_close function to the WM_DELETE_WINDOW protocol
+    popup.protocol("WM_DELETE_WINDOW", on_popup_close)
+
+    # Center the popup over the main window
+    center_popup_over_main_window(popup, app)
     
 # Initialize the main application window
 app = tk.Tk()
