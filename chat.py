@@ -646,7 +646,7 @@ system_message_widget.insert(tk.END, system_message.get())
 
 model_var = tk.StringVar(value="gpt-3.5-turbo")
 ttk.Label(main_frame, text="Model:").grid(row=0, column=6, sticky="ne")
-ttk.OptionMenu(main_frame, model_var, "gpt-3.5-turbo", "gpt-3.5-turbo", "gpt-4").grid(row=0, column=7, sticky="ne")
+ttk.OptionMenu(main_frame, model_var, "gpt-3.5-turbo", "gpt-3.5-turbo", "gpt-4").grid(row=0, column=7, sticky="nw")
 
 # Add sliders for temperature, max length, and top p
 temperature_var = tk.DoubleVar(value=0.7)
@@ -747,7 +747,7 @@ if load_dark_mode_state():
     toggle_dark_mode()
     
 # Add a separator
-ttk.Separator(configuration_frame, orient='horizontal').grid(row=config_row+1, column=0, columnspan=9, sticky="we", pady=3)
+ttk.Separator(configuration_frame, orient='horizontal').grid(row=config_row+1, column=0, columnspan=10, sticky="we", pady=3)
 
 # Set the weights for the configuration frame
 configuration_frame.columnconfigure(3, weight=1)
