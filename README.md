@@ -51,6 +51,12 @@ Note that application startup time is somewhat slow when running from the .exe (
 
 ## Latest Changes
 
+4/13/23
+- Added support for gpt model snapshots (gpt-4-0314 and gpt-3.5-turbo-0301)
+- made the model_var sticky to the west instead of the east.
+- Ensured the configuration frame separator spans the whole window.
+
+4/8/23
 - Support for Unicode added
 - Dark mode added
 - Sliding context window implementation (with 'important' message toggle to keep marked messages in context)
