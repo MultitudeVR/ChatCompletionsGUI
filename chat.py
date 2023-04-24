@@ -9,6 +9,7 @@ import re
 import os
 import platform
 import asyncio
+import ctypes
 
 
 class ToolTip:
@@ -632,6 +633,10 @@ app.geometry("800x600")
 app.title("Chat Completions GUI")
 
 add_app_section_to_config_if_not_present();
+
+# Hide console window on Windows
+if os.name == 'nt':
+    ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
 
 # Create the main_frame for holding the chat and other widgets
 main_frame = ttk.Frame(app, padding="10")
