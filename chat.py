@@ -228,7 +228,7 @@ def send_request():
     def request_thread():
         global is_streaming_cancelled
         messages = get_messages_from_chat_history()
-        max_tokens_for_context_window = (8192 if model_var.get().startswith('gpt-4') else 4096) - max_length_var.get()
+        max_tokens_for_context_window = (16384 if '16k' in model_var.get() else 8192 if model_var.get().startswith('gpt-4') else 4096) - max_length_var.get()
         culled_messages = apply_sliding_context_window(messages, max_tokens=max_tokens_for_context_window)
         remove_unsupported_keys(culled_messages)
         async def streaming_chat_completion():
@@ -651,7 +651,7 @@ system_message_widget.insert(tk.END, system_message.get())
 
 model_var = tk.StringVar(value="gpt-3.5-turbo")
 ttk.Label(main_frame, text="Model:").grid(row=0, column=6, sticky="ne")
-ttk.OptionMenu(main_frame, model_var, "gpt-3.5-turbo", "gpt-3.5-turbo", "gpt-4", "gpt-3.5-turbo-0301", "gpt-4-0314", "gpt-3.5-turbo-0613", "gpt-4-0613").grid(row=0, column=7, sticky="nw")
+ttk.OptionMenu(main_frame, model_var, "gpt-3.5-turbo", "gpt-3.5-turbo", "gpt-4", "gpt-3.5-turbo-0301", "gpt-4-0314", "gpt-3.5-turbo-0613", "gpt-4-0613", "gpt-3.5-turbo-16k").grid(row=0, column=7, sticky="nw")
 
 # Add sliders for temperature, max length, and top p
 temperature_var = tk.DoubleVar(value=0.7)
