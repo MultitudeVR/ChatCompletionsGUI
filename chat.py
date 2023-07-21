@@ -9,7 +9,6 @@ import re
 import os
 import platform
 import asyncio
-import ctypes
 
 
 class ToolTip:
@@ -340,7 +339,10 @@ def update_entry_widths(event=None):
     window_width = app.winfo_width()
     screen_width = app.winfo_screenwidth()
     dpi = app.winfo_fpixels('1i')
-    scaling_factor = 0.12 * ( 96/dpi)
+    if os.name == 'posix':
+        scaling_factor = 0.08 * (96/dpi)
+    else:
+        scaling_factor = 0.12 * (96/dpi)
     # Calculate the new width of the Text widgets based on the window width
     new_entry_width = int((window_width - scaling_factor*1000) * scaling_factor)
 
@@ -636,6 +638,7 @@ add_app_section_to_config_if_not_present();
 
 # Hide console window on Windows
 if os.name == 'nt':
+    import ctypes
     ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
 
 # Create the main_frame for holding the chat and other widgets

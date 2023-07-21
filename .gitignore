@@ -1,6 +1,8 @@
+.DS_Store
 build/
 dist/
 chat_logs/
 __pycache__/
 chat.spec
 config.ini
+
