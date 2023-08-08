@@ -126,18 +126,11 @@ def count_tokens(messages, model):
     for message in messages:
         num_tokens += tokens_per_message
         for key, value in message.items():
-            if key != 'important':
-                num_tokens += len(encoding.encode(value))
+            num_tokens += len(encoding.encode(value))
             if key == "name":
                 num_tokens += tokens_per_name
     num_tokens += 3  # every reply is primed with <|start|>assistant<|message|>
     return num_tokens
-
-def remove_unsupported_keys(messages):
-    for message in messages:
-        if "important" in message:
-            del message["important"]
-    return messages
     
 def get_messages_from_chat_history():
     messages = [
@@ -147,23 +140,20 @@ def get_messages_from_chat_history():
         messages.append(
             {
                 "role": message["role"].get(),
-                "content": message["content_widget"].get("1.0", tk.END).strip(),
-                "important": message["important"].get()
+                "content": message["content_widget"].get("1.0", tk.END).strip()
             }
         )
     return messages
     
 def request_file_name():
     # add to messages a system message informing the AI to create a title
-    messages = get_messages_from_chat_history().copy()
+    messages = get_messages_from_chat_history()
     messages.append(
         {
             "role": "system",
-            "content": "The user is saving this chat log. In your next message, please write only a suggested name for the file. It should be in the format 'file-name-is-separated-by-hyphens', it should be descriptive of the chat you had with the user, and it should be very concise - no more than 4 words (and ideally just 2 or 3). Do not acknowledge this system message with any additional words, please simply write the suggested filename.",
-            "important": True
+            "content": "The user is saving this chat log. In your next message, please write only a suggested name for the file. It should be in the format 'file-name-is-separated-by-hyphens', it should be descriptive of the chat you had with the user, and it should be very concise - no more than 4 words (and ideally just 2 or 3). Do not acknowledge this system message with any additional words, please simply write the suggested filename."
         }
     )
-    remove_unsupported_keys(messages)
     # remove excess messages beyond context window limit for gpt-3.5-turbo
     num_tokens = count_tokens(messages, "gpt-3.5-turbo")
     num_messages = len(messages)
@@ -206,8 +196,7 @@ def show_error_and_open_settings(message):
 def send_request():
     global is_streaming_cancelled
     # get messages
-    messages = get_messages_from_chat_history().copy()
-    remove_unsupported_keys(messages)
+    messages = get_messages_from_chat_history()
 
     # check if too many tokens
     model_max_context_window = (16384 if '16k' in model_var.get() else 8192 if model_var.get().startswith('gpt-4') else 4096)
@@ -353,34 +342,21 @@ def update_content_height(event, content_widget):
             line_length = len(line)
             wrapped_lines += -(-line_length // widget_width)  # Equivalent to math.ceil(line_length / widget_width)
     content_widget.configure(height=wrapped_lines)
-    
-def toggle_important(message):
-    message["important"].set(not message["important"].get())
-    if message["important"].get():
-        message["star_button"].config(style="Important.TButton")
-    else:
-        message["star_button"].config(style="")
-        
+
 def add_message(role="user", content=""):
     global add_button_row
     message = {
         "role": tk.StringVar(value=role),
-        "content": tk.StringVar(value=content),
-        "important": tk.BooleanVar(value=False)
+        "content": tk.StringVar(value=content)
     }
     chat_history.append(message)
 
     row = len(chat_history)
     message["role_button"] = ttk.Button(inner_frame, textvariable=message["role"], command=lambda: toggle_role(message), width=8)
-    message["role_button"].grid(row=row, column=1, sticky="nw")
-
-    message["star_button"] = ttk.Button(inner_frame, text="★", command=lambda: toggle_important(message), width=2)
-    message["star_button"].grid(row=row, column=0, sticky="nw")
-    tooltip_text = "Mark as important. Important messages are prioritized and less likely to be trimmed when reducing message length."
-    ToolTip(message["star_button"], tooltip_text)
+    message["role_button"].grid(row=row, column=0, sticky="nw")
     
     message["content_widget"] = tk.Text(inner_frame, wrap=tk.WORD, height=1, width=50)
-    message["content_widget"].grid(row=row, column=2, sticky="we")
+    message["content_widget"].grid(row=row, column=1, sticky="we")
     message["content_widget"].insert(tk.END, content)
     message["content_widget"].bind("<KeyRelease>", lambda event, content_widget=message["content_widget"]: update_content_height(event, content_widget))
     update_content_height(None, message["content_widget"])
@@ -389,7 +365,7 @@ def add_message(role="user", content=""):
     align_add_button()
 
     message["delete_button"] = ttk.Button(inner_frame, text="-", width=3, command=lambda: delete_message(row))
-    message["delete_button"].grid(row=row, column=3, sticky="ne")
+    message["delete_button"].grid(row=row, column=2, sticky="ne")
 
     chat_frame.yview_moveto(1.5)
 
@@ -739,7 +715,6 @@ style.configure("Dark.TLabel", background="#2c2c2c", foreground="#ffffff")
 # style.configure("Dark.TButton", background="#2c2c2c", foreground="2c2c2c")
 style.configure("Dark.TOptionMenu", background="#2c2c2c", foreground="#ffffff")
 style.configure("Dark.TCheckbutton", background="#2c2c2c", foreground="#ffffff")
-style.configure("Important.TButton", foreground="gold")
 
 dark_mode_var = tk.BooleanVar()
 if load_dark_mode_state():
