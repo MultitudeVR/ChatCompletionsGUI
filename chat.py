@@ -9,6 +9,7 @@ import re
 import os
 import platform
 import asyncio
+import tiktoken
 
 
 class ToolTip:
@@ -107,67 +108,36 @@ def save_chat_history():
             f.write(f"{role}: \"{content}\"\n")
 
     update_chat_file_dropdown(file_path)
-    
-def count_tokens(text):
-    return len(text.encode('utf-8')) // 4
+
+def count_tokens(messages, model):
+    """Return the number of tokens used by a list of messages."""
+    try:
+        encoding = tiktoken.encoding_for_model(model)
+    except KeyError:
+        print("Warning: model not found. Using cl100k_base encoding.")
+        encoding = tiktoken.get_encoding("cl100k_base")
+    if model == "gpt-3.5-turbo-0301":
+        tokens_per_message = 4  # every message follows <|start|>{role/name}\n{content}<|end|>\n
+        tokens_per_name = -1  # if there's a name, the role is omitted
+    else:
+        tokens_per_message = 3
+        tokens_per_name = 1
+    num_tokens = 0
+    for message in messages:
+        num_tokens += tokens_per_message
+        for key, value in message.items():
+            if key != 'important':
+                num_tokens += len(encoding.encode(value))
+            if key == "name":
+                num_tokens += tokens_per_name
+    num_tokens += 3  # every reply is primed with <|start|>assistant<|message|>
+    return num_tokens
 
 def remove_unsupported_keys(messages):
     for message in messages:
         if "important" in message:
             del message["important"]
     return messages
-    
-def apply_sliding_context_window(messages, max_tokens):
-    tokens_to_keep = max_tokens // 3
-    culled_messages = messages.copy()
-
-    current_tokens = sum(count_tokens(msg["content"]) for msg in culled_messages)
-    tokens_to_remove = current_tokens - max_tokens
-    print(str(current_tokens) + " " + str(tokens_to_remove))
-
-    if tokens_to_remove > 0:
-        index_to_start_culling = 0
-        tokens_counted = 0
-        for i, message in enumerate(culled_messages):
-            tokens_counted += count_tokens(message["content"])
-            if tokens_counted >= tokens_to_keep:
-                index_to_start_culling = i
-                print(index_to_start_culling)
-                break
-
-        # First loop: Cull only unimportant messages
-        for i in range(index_to_start_culling, len(culled_messages)):
-            message = culled_messages[i]
-            important = message.get("important", False)
-
-            if not important:
-                print("index: " + str(i))
-                message_tokens = count_tokens(message["content"])
-                chars_to_remove = min(tokens_to_remove * 4, message_tokens * 4)
-                culled_messages[i]["content"] = message["content"][:-chars_to_remove]
-                print(culled_messages[i]["content"])
-                tokens_to_remove -= (chars_to_remove // 4)
-            if(tokens_to_remove) <= 0:
-                break;
-
-        # Second loop: Cull important messages if necessary
-        if tokens_to_remove > 0:
-            for i in range(index_to_start_culling, len(culled_messages)):
-                print("index (important): " + str(i))
-                message = culled_messages[i]
-                if message.get("role") == "system":
-                    print("skipping system")
-                    continue
-                message_tokens = count_tokens(message["content"])
-                chars_to_remove = min(tokens_to_remove * 4, message_tokens * 4)
-                culled_messages[i]["content"] = message["content"][:-chars_to_remove]
-                print(culled_messages[i]["content"])
-                tokens_to_remove -= (chars_to_remove // 4)
-                if(tokens_to_remove) <= 0:
-                    break;
-    print(sum(count_tokens(msg["content"]) for msg in culled_messages))
-    
-    return culled_messages
     
 def get_messages_from_chat_history():
     messages = [
@@ -184,7 +154,8 @@ def get_messages_from_chat_history():
     return messages
     
 def request_file_name():
-    messages = get_messages_from_chat_history()
+    # add to messages a system message informing the AI to create a title
+    messages = get_messages_from_chat_history().copy()
     messages.append(
         {
             "role": "system",
@@ -192,12 +163,25 @@ def request_file_name():
             "important": True
         }
     )
-    culled_messages = apply_sliding_context_window(messages, max_tokens=4096)
-    remove_unsupported_keys(culled_messages)
+    remove_unsupported_keys(messages)
+    # remove excess messages beyond context window limit for gpt-3.5-turbo
+    num_tokens = count_tokens(messages, "gpt-3.5-turbo")
+    num_messages = len(messages)
+    if num_tokens > 4096:
+        for i in range(num_messages):
+            if i < 0:
+                break
+            num_tokens_in_this_message = count_tokens([messages[num_messages-i-2]], "gpt-3.5-turbo")
+            messages[num_messages-i-2]["content"] = ""
+            num_tokens = num_tokens - num_tokens_in_this_message
+            if num_tokens <= 4096:
+                break
+    # get completion
     response = openai.ChatCompletion.create(
       model="gpt-3.5-turbo",
-      messages=culled_messages
+      messages=messages
     )
+    # return the filename
     suggested_filename = response["choices"][0]["message"]["content"].strip()
     return suggested_filename
     
@@ -221,21 +205,28 @@ def show_error_and_open_settings(message):
  
 def send_request():
     global is_streaming_cancelled
-    is_streaming_cancelled = False
-    set_submit_button(False)
+    # get messages
+    messages = get_messages_from_chat_history().copy()
+    remove_unsupported_keys(messages)
+
+    # check if too many tokens
+    model_max_context_window = (16384 if '16k' in model_var.get() else 8192 if model_var.get().startswith('gpt-4') else 4096)
+    num_prompt_tokens = count_tokens(messages, model_var.get())
+    num_completion_tokens = int(max_length_var.get())
+    if num_prompt_tokens + num_completion_tokens > model_max_context_window:
+        show_error_popup(f"combined prompt and completion tokens ({num_prompt_tokens} + {num_completion_tokens} = {num_prompt_tokens+num_completion_tokens}) exceeds this model's maximum context window of {model_max_context_window}.")
+        return
     
+    # send request
     def request_thread():
         global is_streaming_cancelled
-        messages = get_messages_from_chat_history()
-        max_tokens_for_context_window = (16384 if '16k' in model_var.get() else 8192 if model_var.get().startswith('gpt-4') else 4096) - max_length_var.get()
-        culled_messages = apply_sliding_context_window(messages, max_tokens=max_tokens_for_context_window)
-        remove_unsupported_keys(culled_messages)
+
         async def streaming_chat_completion():
             global is_streaming_cancelled
             try:
                 async for chunk in await openai.ChatCompletion.acreate(
                     model=model_var.get(),
-                    messages=culled_messages,
+                    messages=messages,
                     temperature=temperature_var.get(),
                     max_tokens=max_length_var.get(),
                     top_p=1,
@@ -257,7 +248,6 @@ def send_request():
             except Exception as e:
                 error_message = f"An unexpected error occurred: {e}"
                 loop.call_soon_threadsafe(show_error_popup, error_message)
-
             if not is_streaming_cancelled:
                 app.after(0, add_empty_user_message)
 
@@ -265,6 +255,8 @@ def send_request():
         asyncio.set_event_loop(loop)
         loop.run_until_complete(streaming_chat_completion())
 
+    is_streaming_cancelled = False
+    set_submit_button(False)
     Thread(target=request_thread).start()
   
 def update_chat_file_dropdown(new_file_path):
@@ -473,7 +465,7 @@ def on_temp_entry_change(*args):
 def on_max_len_entry_change(*args):
     try:
         value = int(max_len_entry_var.get())
-        if 1 <= value <= 4000:
+        if 1 <= value <= 8000:
             max_length_var.set(value)
         else:
             raise ValueError
@@ -664,7 +656,7 @@ temperature_scale.grid(row=0, column=7, sticky="w")
 
 max_length_var = tk.IntVar(value=256)
 ttk.Label(main_frame, text="Max Length:").grid(row=0, column=6, sticky="se")
-max_length_scale = ttk.Scale(main_frame, variable=max_length_var, from_=1, to=4000, orient="horizontal")
+max_length_scale = ttk.Scale(main_frame, variable=max_length_var, from_=1, to=8000, orient="horizontal")
 max_length_scale.grid(row=0, column=7, sticky="sw")
 
 # Add Entry widgets for temperature and max length
