@@ -286,7 +286,7 @@ def load_chat_history():
             lines = chat_content.splitlines()
 
             for line in lines:
-                if line.startswith("user: ") or line.startswith("assistant: "):
+                if line.startswith("user: ") or line.startswith("assistant: ") or line.startswith("system: "):
                     role, content = line.strip().split(": ", 1)
                     add_message(role, content[1:-1] if line.endswith("\"") else content[1:] + "\n")
                 else:
@@ -392,8 +392,11 @@ def delete_message(row):
     cancel_streaming()
 
 def toggle_role(message):
-    if message["role"].get() == "user":
+    current_role = message["role"].get()
+    if current_role == "user":
         message["role"].set("assistant")
+    elif current_role == "assistant":
+        message["role"].set("system")
     else:
         message["role"].set("user")
 
