@@ -629,7 +629,7 @@ ttk.Label(main_frame, text="Temperature:").grid(row=0, column=6, sticky="e")
 temperature_scale = ttk.Scale(main_frame, variable=temperature_var, from_=0, to=1, orient="horizontal")
 temperature_scale.grid(row=0, column=7, sticky="w")
 
-max_length_var = tk.IntVar(value=256)
+max_length_var = tk.IntVar(value=2000)
 ttk.Label(main_frame, text="Max Length:").grid(row=0, column=6, sticky="se")
 max_length_scale = ttk.Scale(main_frame, variable=max_length_var, from_=1, to=8000, orient="horizontal")
 max_length_scale.grid(row=0, column=7, sticky="sw")
