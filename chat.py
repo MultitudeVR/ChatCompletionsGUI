@@ -354,8 +354,7 @@ def add_message(role="user", content=""):
     row = len(chat_history)
     message["role_button"] = ttk.Button(inner_frame, textvariable=message["role"], command=lambda: toggle_role(message), width=8)
     message["role_button"].grid(row=row, column=0, sticky="nw")
-    
-    message["content_widget"] = tk.Text(inner_frame, wrap=tk.WORD, height=1, width=50)
+    message["content_widget"] = tk.Text(inner_frame, wrap=tk.WORD, height=1, width=50, undo=True)
     message["content_widget"].grid(row=row, column=1, sticky="we")
     message["content_widget"].insert(tk.END, content)
     message["content_widget"].bind("<KeyRelease>", lambda event, content_widget=message["content_widget"]: update_content_height(event, content_widget))
@@ -616,7 +615,7 @@ main_frame.grid(row=1, column=0, sticky="nsew")
 # System message and model selection
 system_message = tk.StringVar(value=system_message_default_text)
 ttk.Label(main_frame, text="System message:").grid(row=0, column=0, sticky="w")
-system_message_widget = tk.Text(main_frame, wrap=tk.WORD, height=5, width=50)
+system_message_widget = tk.Text(main_frame, wrap=tk.WORD, height=5, width=50, undo=True)
 system_message_widget.grid(row=0, column=1, sticky="we", pady=3)
 system_message_widget.insert(tk.END, system_message.get())
 
