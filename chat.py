@@ -10,7 +10,11 @@ import os
 import platform
 import asyncio
 import tiktoken
-
+import json
+from datetime import datetime
+import random
+import string
+import urllib.parse
 
 class ToolTip:
     def __init__(self, widget, text):
@@ -78,14 +82,26 @@ def clear_chat_history():
 
     chat_history.clear()
     
+
 def save_chat_history():
     filename = chat_filename_var.get()
+    chat_data = {
+        "system_message": system_message_widget.get("1.0", tk.END).strip(),
+        "chat_history": [
+            {
+                "role": message["role"].get(),
+                "content": message["content_widget"].get("1.0", tk.END).strip()
+            }
+            for message in chat_history
+        ]
+    }
 
     if filename == "<new-log>":
         # Get a file name suggestion from the API
         suggested_filename = request_file_name()
         file_path = filedialog.asksaveasfilename(
-            defaultextension=".txt", initialdir="chat_logs", initialfile=suggested_filename, title="Save Chat Log"
+            defaultextension=".json", initialdir="chat_logs", initialfile=suggested_filename, title="Save Chat Log",
+            filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")]  # Add a file type filter for JSON
         )
     else:
         file_path = os.path.join("chat_logs", filename)
@@ -96,16 +112,8 @@ def save_chat_history():
     if not file_path:
         return
 
-    # Save the chat history to the file
     with open(file_path, "w", encoding='utf-8') as f:
-        # Add the system message to the beginning of the chat history
-        system_message = system_message_widget.get("1.0", tk.END).strip()
-        f.write(f"system: \"{system_message}\"\n")
-
-        for message in chat_history:
-            role = message["role"].get()
-            content = message["content_widget"].get("1.0", tk.END).strip()
-            f.write(f"{role}: \"{content}\"\n")
+        json.dump(chat_data, f, indent=4)
 
     update_chat_file_dropdown(file_path)
 
@@ -192,20 +200,54 @@ def show_error_and_open_settings(message):
     else:
         show_popup()
     show_error_popup(message)
- 
+
+def parse_and_create_image_messages(content):
+    # This pattern matches common image URLs ending with .jpg, .jpeg, .webp, or .png
+    image_url_pattern = r"https?://[^\s]+?\.(?:jpg|jpeg|png|webp)"
+    image_urls = re.findall(image_url_pattern, content, re.IGNORECASE)
+
+    # Create an array of image messages for the API
+    image_messages = [{"type": "image_url", "image_url": url} for url in image_urls]
+
+    # Remove the image URLs from the original content
+    non_image_content = re.sub(image_url_pattern, "", content).strip()
+
+    # If there is non-image content, add it at the beginning of the array as a text message
+    if non_image_content:
+        image_messages.insert(0, {"type": "text", "text": non_image_content})
+
+    # Wrap the image and text messages in a 'content' array
+    if image_messages:
+        return {"role": "user", "content": image_messages}
+    else:
+        # If no image URLs are found, return a standard text message
+        return {"role": "user", "content": [{"type": "text", "text": non_image_content}]}
+
 def send_request():
     global is_streaming_cancelled
     # get messages
     messages = get_messages_from_chat_history()
 
     # check if too many tokens
-    model_max_context_window = (16384 if '16k' in model_var.get() else 8192 if model_var.get().startswith('gpt-4') else 4096)
+    model_max_context_window = (16384 if '16k' in model_var.get() else 128000 if model_var.get() == 'gpt-4-1106-preview' else 8192 if model_var.get().startswith('gpt-4') else 4096)
     num_prompt_tokens = count_tokens(messages, model_var.get())
     num_completion_tokens = int(max_length_var.get())
     if num_prompt_tokens + num_completion_tokens > model_max_context_window:
         show_error_popup(f"combined prompt and completion tokens ({num_prompt_tokens} + {num_completion_tokens} = {num_prompt_tokens+num_completion_tokens}) exceeds this model's maximum context window of {model_max_context_window}.")
         return
-    
+    # convert messages to image api format, if necessary
+    if model_var.get() == "gpt-4-vision-preview":
+        # Update the messages to include image data if any image URLs are found in the user's input
+        new_messages = []
+        for message in messages:
+            if message["role"] == "user" and "content" in message:
+                # Check for image URLs and create a single message with a 'content' array
+                message_with_images = parse_and_create_image_messages(message["content"])
+                new_messages.append(message_with_images)
+            else:
+                # System or assistant messages are added unchanged
+                new_messages.append(message)
+        messages = new_messages
     # send request
     def request_thread():
         global is_streaming_cancelled
@@ -252,13 +294,22 @@ def update_chat_file_dropdown(new_file_path):
     new_file_name = os.path.basename(new_file_path)
     if new_file_name not in chat_files:
         chat_files.append(new_file_name)
-        chat_file_dropdown["menu"].add_command(label=new_file_name, command=tk._setit(chat_filename_var, new_file_name))
+        # Sort the list of chat files after appending the new file
+        chat_files.sort(
+            key=lambda x: os.path.getmtime(os.path.join("chat_logs", x)),
+            reverse=True
+        )
+        # Clear and repopulate the dropdown menu with sorted files
+        menu = chat_file_dropdown["menu"]
+        menu.delete(0, "end")
+        for file in chat_files:
+            menu.add_command(label=file, command=lambda value=file: chat_filename_var.set(value))
     chat_filename_var.set(new_file_name)
 
 def load_chat_history():
     filename = chat_filename_var.get()
+    
     if not filename or filename == "<new-log>":
-        # No file selected? Load default
         clear_chat_history()
         system_message_widget.delete("1.0", tk.END)
         system_message_widget.insert(tk.END, system_message_default_text)
@@ -266,31 +317,18 @@ def load_chat_history():
         return
 
     filepath = os.path.join("chat_logs", filename)
-    if os.path.exists(filepath):
+    if os.path.exists(filepath) and filepath.endswith('.json'):
         with open(filepath, "r", encoding='utf-8') as f:
-            content = f.read()
+            chat_data = json.load(f)
 
         clear_chat_history()
 
-        # Extract the system message and the remaining chat content using a regex pattern
-        pattern = re.compile(r'^system: "(?P<system_message>.*?)"\n(?P<chat_content>.+)', re.DOTALL)
-        match = pattern.match(content)
+        system_message = chat_data["system_message"]
+        system_message_widget.delete("1.0", tk.END)
+        system_message_widget.insert(tk.END, system_message)
 
-        if match:
-            system_message = match.group("system_message")
-            chat_content = match.group("chat_content")
-
-            system_message_widget.delete("1.0", tk.END)
-            system_message_widget.insert(tk.END, system_message)
-
-            lines = chat_content.splitlines()
-
-            for line in lines:
-                if line.startswith("user: ") or line.startswith("assistant: ") or line.startswith("system: "):
-                    role, content = line.strip().split(": ", 1)
-                    add_message(role, content[1:-1] if line.endswith("\"") else content[1:] + "\n")
-                else:
-                    chat_history[-1]["content_widget"].insert(tk.END, line[:-1] if line.endswith("\"") else line + "\n")
+        for entry in chat_data["chat_history"]:
+            add_message(entry["role"], entry["content"])
 
     app.after(100, update_height_of_all_messages)
 
@@ -512,7 +550,41 @@ def get_default_bg_color(root):
     # Destroy the temporary button
     temp_button.destroy()
     return default_bg_color
-    
+
+def on_close():
+   # Generate a timestamp string with the format "YYYYMMDD_HHMMSS"
+   timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+   # Generate a random 6-character alphanumeric ID
+   random_id = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
+   # Combine the timestamp and random ID to create the filename
+   filename = f"{timestamp}_{random_id}.json"
+
+   # Create the 'temp/backup/' directory if it doesn't exist
+   backup_path = "temp/backup"
+   if not os.path.exists(backup_path):
+       os.makedirs(backup_path)
+
+   # Construct the full file path
+   file_path = os.path.join(backup_path, filename)
+
+   # Get the chat history data
+   chat_data = {
+       "system_message": system_message_widget.get("1.0", tk.END).strip(),
+       "chat_history": [
+           {
+               "role": message["role"].get(),
+               "content": message["content_widget"].get("1.0", tk.END).strip()
+           }
+           for message in chat_history
+       ]
+   }
+
+   # Save the chat history to the file
+   with open(file_path, "w", encoding='utf-8') as f:
+       json.dump(chat_data, f, indent=4)
+
+   # Close the application
+   app.destroy()
 
 popup = None
 popup_frame = None
@@ -598,7 +670,7 @@ def set_submit_button(active):
     else:
         submit_button_text.set("Cancel")
         submit_button.configure(command=cancel_streaming)
-        
+
 # Initialize the main application window
 app = tk.Tk()
 app.geometry("800x600")
@@ -622,9 +694,9 @@ system_message_widget = tk.Text(main_frame, wrap=tk.WORD, height=5, width=50, un
 system_message_widget.grid(row=0, column=1, sticky="we", pady=3)
 system_message_widget.insert(tk.END, system_message.get())
 
-model_var = tk.StringVar(value="gpt-3.5-turbo")
+model_var = tk.StringVar(value="gpt-4")
 ttk.Label(main_frame, text="Model:").grid(row=0, column=6, sticky="ne")
-ttk.OptionMenu(main_frame, model_var, "gpt-3.5-turbo", "gpt-3.5-turbo", "gpt-4", "gpt-3.5-turbo-16k", "gpt-3.5-turbo-0301", "gpt-4-0314", "gpt-3.5-turbo-0613", "gpt-4-0613").grid(row=0, column=7, sticky="nw")
+ttk.OptionMenu(main_frame, model_var, "gpt-4-1106-preview", "gpt-4-1106-preview", "gpt-4", "gpt-3.5-turbo", "gpt-4-vision-preview", "gpt-3.5-turbo-16k", "gpt-3.5-turbo-0301", "gpt-4-0314", "gpt-3.5-turbo-0613", "gpt-4-0613").grid(row=0, column=7, sticky="nw")
 
 # Add sliders for temperature, max length, and top p
 temperature_var = tk.DoubleVar(value=0.7)
@@ -632,7 +704,7 @@ ttk.Label(main_frame, text="Temperature:").grid(row=0, column=6, sticky="e")
 temperature_scale = ttk.Scale(main_frame, variable=temperature_var, from_=0, to=1, orient="horizontal")
 temperature_scale.grid(row=0, column=7, sticky="w")
 
-max_length_var = tk.IntVar(value=2000)
+max_length_var = tk.IntVar(value=4000)
 ttk.Label(main_frame, text="Max Length:").grid(row=0, column=6, sticky="se")
 max_length_scale = ttk.Scale(main_frame, variable=max_length_var, from_=1, to=8000, orient="horizontal")
 max_length_scale.grid(row=0, column=7, sticky="sw")
@@ -685,7 +757,11 @@ configuration_frame.grid(row=0, column=0, sticky="new")
 config_row = 0
 # Add a dropdown menu to select a chat log file to load
 chat_filename_var = tk.StringVar()
-chat_files = [f for f in os.listdir("chat_logs") if os.path.isfile(os.path.join("chat_logs", f))]
+chat_files = sorted(
+    [f for f in os.listdir("chat_logs") if os.path.isfile(os.path.join("chat_logs", f)) and f.endswith('.json')],
+    key=lambda x: os.path.getmtime(os.path.join("chat_logs", x)),
+    reverse=True
+)
 ttk.Label(configuration_frame, text="Chat Log:").grid(row=config_row, column=0, sticky="w")
 default_chat_file = "<new-log>"
 chat_files.insert(0, default_chat_file)
@@ -744,6 +820,8 @@ inner_frame.bind("<Configure>", configure_scrollregion)
 app.bind("<Configure>", update_entry_widths)
 app.bind_class('Entry', '<FocusOut>', update_previous_focused_widget)
 app.bind("<Escape>", lambda event: show_popup())
-    
+
+# Add a protocol to handle the close event
+app.protocol("WM_DELETE_WINDOW", on_close)
 # Start the application main loop
 app.mainloop()

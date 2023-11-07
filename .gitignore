@@ -2,6 +2,7 @@
 build/
 dist/
 chat_logs/
+temp/
 __pycache__/
 chat.spec
 config.ini
