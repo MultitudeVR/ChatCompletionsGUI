@@ -10,6 +10,7 @@ import os
 import platform
 import asyncio
 import tiktoken
+import json
 
 
 class ToolTip:
@@ -78,14 +79,26 @@ def clear_chat_history():
 
     chat_history.clear()
     
+
 def save_chat_history():
     filename = chat_filename_var.get()
+    chat_data = {
+        "system_message": system_message_widget.get("1.0", tk.END).strip(),
+        "chat_history": [
+            {
+                "role": message["role"].get(),
+                "content": message["content_widget"].get("1.0", tk.END).strip()
+            }
+            for message in chat_history
+        ]
+    }
 
     if filename == "<new-log>":
         # Get a file name suggestion from the API
         suggested_filename = request_file_name()
         file_path = filedialog.asksaveasfilename(
-            defaultextension=".txt", initialdir="chat_logs", initialfile=suggested_filename, title="Save Chat Log"
+            defaultextension=".json", initialdir="chat_logs", initialfile=suggested_filename, title="Save Chat Log",
+            filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")]  # Add a file type filter for JSON
         )
     else:
         file_path = os.path.join("chat_logs", filename)
@@ -96,16 +109,8 @@ def save_chat_history():
     if not file_path:
         return
 
-    # Save the chat history to the file
     with open(file_path, "w", encoding='utf-8') as f:
-        # Add the system message to the beginning of the chat history
-        system_message = system_message_widget.get("1.0", tk.END).strip()
-        f.write(f"system: \"{system_message}\"\n")
-
-        for message in chat_history:
-            role = message["role"].get()
-            content = message["content_widget"].get("1.0", tk.END).strip()
-            f.write(f"{role}: \"{content}\"\n")
+        json.dump(chat_data, f, indent=4)
 
     update_chat_file_dropdown(file_path)
 
@@ -266,8 +271,8 @@ def update_chat_file_dropdown(new_file_path):
 
 def load_chat_history():
     filename = chat_filename_var.get()
+    
     if not filename or filename == "<new-log>":
-        # No file selected? Load default
         clear_chat_history()
         system_message_widget.delete("1.0", tk.END)
         system_message_widget.insert(tk.END, system_message_default_text)
@@ -275,31 +280,18 @@ def load_chat_history():
         return
 
     filepath = os.path.join("chat_logs", filename)
-    if os.path.exists(filepath):
+    if os.path.exists(filepath) and filepath.endswith('.json'):
         with open(filepath, "r", encoding='utf-8') as f:
-            content = f.read()
+            chat_data = json.load(f)
 
         clear_chat_history()
 
-        # Extract the system message and the remaining chat content using a regex pattern
-        pattern = re.compile(r'^system: "(?P<system_message>.*?)"\n(?P<chat_content>.+)', re.DOTALL)
-        match = pattern.match(content)
+        system_message = chat_data["system_message"]
+        system_message_widget.delete("1.0", tk.END)
+        system_message_widget.insert(tk.END, system_message)
 
-        if match:
-            system_message = match.group("system_message")
-            chat_content = match.group("chat_content")
-
-            system_message_widget.delete("1.0", tk.END)
-            system_message_widget.insert(tk.END, system_message)
-
-            lines = chat_content.splitlines()
-
-            for line in lines:
-                if line.startswith("user: ") or line.startswith("assistant: ") or line.startswith("system: "):
-                    role, content = line.strip().split(": ", 1)
-                    add_message(role, content[1:-1] if line.endswith("\"") else content[1:] + "\n")
-                else:
-                    chat_history[-1]["content_widget"].insert(tk.END, line[:-1] if line.endswith("\"") else line + "\n")
+        for entry in chat_data["chat_history"]:
+            add_message(entry["role"], entry["content"])
 
     app.after(100, update_height_of_all_messages)
 
@@ -695,7 +687,7 @@ config_row = 0
 # Add a dropdown menu to select a chat log file to load
 chat_filename_var = tk.StringVar()
 chat_files = sorted(
-    [f for f in os.listdir("chat_logs") if os.path.isfile(os.path.join("chat_logs", f))],
+    [f for f in os.listdir("chat_logs") if os.path.isfile(os.path.join("chat_logs", f)) and f.endswith('.json')],
     key=lambda x: os.path.getmtime(os.path.join("chat_logs", x)),
     reverse=True
 )
