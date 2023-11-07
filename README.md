@@ -1,6 +1,6 @@
 # Chat Completions GUI
 
-This is a simple Graphical User Interface (GUI) application for working with the OpenAI API, allowing you to use OpenAI's Chat Completions (GPT-3.5-turbo and GPT-4) in your local desktop environment.
+This is a simple Graphical User Interface (GUI) application for working with the OpenAI API, allowing you to use OpenAI's Chat Completions (GPT-3.5-turbo, GPT-4, and now GPT-4-turbo) in your local desktop environment.
 
 ![Screenshot of Chat Completions GUI](chat_completions_gui.png)
 
@@ -40,30 +40,35 @@ For Windows users, download the executable file from the [GitHub release page](h
 
 Note that application startup time is somewhat slow when running from the .exe (it takes approximately 10 seconds).
 
+Also note that this is an old version of the gui.
+
 ## Features
 
-- Interact with GPT-3.5-turbo and GPT-4 models
+- Interact with GPT-3.5-turbo, GPT-4, and GPT-4-turbo models
 - Easily add, edit, and delete chat messages
-- Save and load chat logs
+- Save and load chat logs in JSON format
+- Image analysis via vision API (currently supports web links only)
 - Customizable system message and model selection
-- Customizable temperature and max response length
+- Customizable temperature and max response length settings
 - Windows, Mac, Linux, and Android support
 
 ## Latest Changes
 
-4/13/23
-- Added support for gpt model snapshots (gpt-4-0314 and gpt-3.5-turbo-0301)
-- made the model_var sticky to the west instead of the east.
-- Ensured the configuration frame separator spans the whole window.
+11/6/23
+- Implemented vision API which currently supports image analysis via web links
+- Chat logs are now saved automatically on-close in the `/temp/backup/` folder
+- Chat logs are now saved as JSON. A conversion script has been added to convert old format logs
+- Added the new gpt-4-turbo model, and chat logs are now sorted by date
+- Removed the concept of an 'important message' as well as the sliding context window feature
+- Set default max length for messages to 4000
+- Made token counting more accurate using tiktoken
+- Enabled 'undo' on message text contents
 
-4/8/23
-- Support for Unicode added
-- Dark mode added
-- Sliding context window implementation (with 'important' message toggle to keep marked messages in context)
-- Certain settings moved into their own popup window
-- User-visible error message added when API key or Org ID are not configured correctly
-- 'Cancel' and 'submit' buttons consolidated into one button
-- Tooltips implemented for some buttons
+8/14/23
+- Added support for system messages besides the first one
+
+7/21/23
+- Added Mac support
 
 ## License
 
