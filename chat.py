@@ -199,7 +199,7 @@ def send_request():
     messages = get_messages_from_chat_history()
 
     # check if too many tokens
-    model_max_context_window = (16384 if '16k' in model_var.get() else 8192 if model_var.get().startswith('gpt-4') else 4096)
+    model_max_context_window = (16384 if '16k' in model_var.get() else 128000 if model_var.get() == 'gpt-4-1106-preview' else 8192 if model_var.get().startswith('gpt-4') else 4096)
     num_prompt_tokens = count_tokens(messages, model_var.get())
     num_completion_tokens = int(max_length_var.get())
     if num_prompt_tokens + num_completion_tokens > model_max_context_window:
@@ -252,7 +252,16 @@ def update_chat_file_dropdown(new_file_path):
     new_file_name = os.path.basename(new_file_path)
     if new_file_name not in chat_files:
         chat_files.append(new_file_name)
-        chat_file_dropdown["menu"].add_command(label=new_file_name, command=tk._setit(chat_filename_var, new_file_name))
+        # Sort the list of chat files after appending the new file
+        chat_files.sort(
+            key=lambda x: os.path.getmtime(os.path.join("chat_logs", x)),
+            reverse=True
+        )
+        # Clear and repopulate the dropdown menu with sorted files
+        menu = chat_file_dropdown["menu"]
+        menu.delete(0, "end")
+        for file in chat_files:
+            menu.add_command(label=file, command=lambda value=file: chat_filename_var.set(value))
     chat_filename_var.set(new_file_name)
 
 def load_chat_history():
@@ -622,9 +631,9 @@ system_message_widget = tk.Text(main_frame, wrap=tk.WORD, height=5, width=50, un
 system_message_widget.grid(row=0, column=1, sticky="we", pady=3)
 system_message_widget.insert(tk.END, system_message.get())
 
-model_var = tk.StringVar(value="gpt-3.5-turbo")
+model_var = tk.StringVar(value="gpt-4")
 ttk.Label(main_frame, text="Model:").grid(row=0, column=6, sticky="ne")
-ttk.OptionMenu(main_frame, model_var, "gpt-3.5-turbo", "gpt-3.5-turbo", "gpt-4", "gpt-3.5-turbo-16k", "gpt-3.5-turbo-0301", "gpt-4-0314", "gpt-3.5-turbo-0613", "gpt-4-0613").grid(row=0, column=7, sticky="nw")
+ttk.OptionMenu(main_frame, model_var, "gpt-4", "gpt-4", "gpt-3.5-turbo", "gpt-3.5-turbo-16k", "gpt-3.5-turbo-0301", "gpt-4-1106-preview", "gpt-4-0314", "gpt-3.5-turbo-0613", "gpt-4-0613").grid(row=0, column=7, sticky="nw")
 
 # Add sliders for temperature, max length, and top p
 temperature_var = tk.DoubleVar(value=0.7)
@@ -685,7 +694,11 @@ configuration_frame.grid(row=0, column=0, sticky="new")
 config_row = 0
 # Add a dropdown menu to select a chat log file to load
 chat_filename_var = tk.StringVar()
-chat_files = [f for f in os.listdir("chat_logs") if os.path.isfile(os.path.join("chat_logs", f))]
+chat_files = sorted(
+    [f for f in os.listdir("chat_logs") if os.path.isfile(os.path.join("chat_logs", f))],
+    key=lambda x: os.path.getmtime(os.path.join("chat_logs", x)),
+    reverse=True
+)
 ttk.Label(configuration_frame, text="Chat Log:").grid(row=config_row, column=0, sticky="w")
 default_chat_file = "<new-log>"
 chat_files.insert(0, default_chat_file)
