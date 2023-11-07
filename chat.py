@@ -14,6 +14,7 @@ import json
 from datetime import datetime
 import random
 import string
+import urllib.parse
 
 class ToolTip:
     def __init__(self, widget, text):
@@ -199,7 +200,29 @@ def show_error_and_open_settings(message):
     else:
         show_popup()
     show_error_popup(message)
- 
+
+def parse_and_create_image_messages(content):
+    # This pattern matches common image URLs ending with .jpg, .jpeg, .webp, or .png
+    image_url_pattern = r"https?://[^\s]+?\.(?:jpg|jpeg|png|webp)"
+    image_urls = re.findall(image_url_pattern, content, re.IGNORECASE)
+
+    # Create an array of image messages for the API
+    image_messages = [{"type": "image_url", "image_url": url} for url in image_urls]
+
+    # Remove the image URLs from the original content
+    non_image_content = re.sub(image_url_pattern, "", content).strip()
+
+    # If there is non-image content, add it at the beginning of the array as a text message
+    if non_image_content:
+        image_messages.insert(0, {"type": "text", "text": non_image_content})
+
+    # Wrap the image and text messages in a 'content' array
+    if image_messages:
+        return {"role": "user", "content": image_messages}
+    else:
+        # If no image URLs are found, return a standard text message
+        return {"role": "user", "content": [{"type": "text", "text": non_image_content}]}
+
 def send_request():
     global is_streaming_cancelled
     # get messages
@@ -212,7 +235,19 @@ def send_request():
     if num_prompt_tokens + num_completion_tokens > model_max_context_window:
         show_error_popup(f"combined prompt and completion tokens ({num_prompt_tokens} + {num_completion_tokens} = {num_prompt_tokens+num_completion_tokens}) exceeds this model's maximum context window of {model_max_context_window}.")
         return
-    
+    # convert messages to image api format, if necessary
+    if model_var.get() == "gpt-4-vision-preview":
+        # Update the messages to include image data if any image URLs are found in the user's input
+        new_messages = []
+        for message in messages:
+            if message["role"] == "user" and "content" in message:
+                # Check for image URLs and create a single message with a 'content' array
+                message_with_images = parse_and_create_image_messages(message["content"])
+                new_messages.append(message_with_images)
+            else:
+                # System or assistant messages are added unchanged
+                new_messages.append(message)
+        messages = new_messages
     # send request
     def request_thread():
         global is_streaming_cancelled
@@ -635,7 +670,7 @@ def set_submit_button(active):
     else:
         submit_button_text.set("Cancel")
         submit_button.configure(command=cancel_streaming)
-        
+
 # Initialize the main application window
 app = tk.Tk()
 app.geometry("800x600")
@@ -661,7 +696,7 @@ system_message_widget.insert(tk.END, system_message.get())
 
 model_var = tk.StringVar(value="gpt-4")
 ttk.Label(main_frame, text="Model:").grid(row=0, column=6, sticky="ne")
-ttk.OptionMenu(main_frame, model_var, "gpt-4-1106-preview", "gpt-4-1106-preview", "gpt-4", "gpt-3.5-turbo", "gpt-3.5-turbo-16k", "gpt-3.5-turbo-0301", "gpt-4-0314", "gpt-3.5-turbo-0613", "gpt-4-0613").grid(row=0, column=7, sticky="nw")
+ttk.OptionMenu(main_frame, model_var, "gpt-4-1106-preview", "gpt-4-1106-preview", "gpt-4", "gpt-3.5-turbo", "gpt-4-vision-preview", "gpt-3.5-turbo-16k", "gpt-3.5-turbo-0301", "gpt-4-0314", "gpt-3.5-turbo-0613", "gpt-4-0613").grid(row=0, column=7, sticky="nw")
 
 # Add sliders for temperature, max length, and top p
 temperature_var = tk.DoubleVar(value=0.7)
