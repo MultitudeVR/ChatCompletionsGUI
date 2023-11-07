@@ -56,9 +56,10 @@ Also note that this is an old version of the gui.
 
 11/6/23
 - Implemented vision API which currently supports image analysis via web links
+- Added the new gpt-4-turbo model
 - Chat logs are now saved automatically on-close in the `/temp/backup/` folder
 - Chat logs are now saved as JSON. A conversion script has been added to convert old format logs
-- Added the new gpt-4-turbo model, and chat logs are now sorted by date
+- Chat logs are now sorted by date
 - Removed the concept of an 'important message' as well as the sliding context window feature
 - Set default max length for messages to 4000
 - Made token counting more accurate using tiktoken
