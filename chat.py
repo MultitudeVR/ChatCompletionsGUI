@@ -202,27 +202,20 @@ def show_error_and_open_settings(message):
     show_error_popup(message)
 
 def parse_and_create_image_messages(content):
-    # This pattern matches common image URLs ending with .jpg, .jpeg, .webp, or .png
     image_url_pattern = r"https?://[^\s]+?\.(?:jpg|jpeg|png|webp)"
     image_urls = re.findall(image_url_pattern, content, re.IGNORECASE)
 
-    # Create an array of image messages for the API
-    image_detail = image_detail_var.get()
-    image_messages = [{"type": "image_url", "image_url": {"url": url, "detail": image_detail}} for url in image_urls]
+    parts = re.split(image_url_pattern, content)
+    messages = []
 
-    # Remove the image URLs from the original content
-    non_image_content = re.sub(image_url_pattern, "", content).strip()
+    for i, text in enumerate(parts):
+        text = text.strip()
+        if text:
+            messages.append({"type": "text", "text": text})
+        if i < len(image_urls):
+            messages.append({"type": "image_url", "image_url": {"url": image_urls[i], "detail": image_detail_var.get()}})
 
-    # If there is non-image content, add it at the beginning of the array as a text message
-    if non_image_content:
-        image_messages.insert(0, {"type": "text", "text": non_image_content})
-
-    # Wrap the image and text messages in a 'content' array
-    if image_messages:
-        return {"role": "user", "content": image_messages}
-    else:
-        # If no image URLs are found, return a standard text message
-        return {"role": "user", "content": [{"type": "text", "text": non_image_content}]}
+    return {"role": "user", "content": messages}
 
 def send_request():
     global is_streaming_cancelled
