@@ -207,7 +207,8 @@ def parse_and_create_image_messages(content):
     image_urls = re.findall(image_url_pattern, content, re.IGNORECASE)
 
     # Create an array of image messages for the API
-    image_messages = [{"type": "image_url", "image_url": url} for url in image_urls]
+    image_detail = image_detail_var.get()
+    image_messages = [{"type": "image_url", "image_url": {"url": url, "detail": image_detail}} for url in image_urls]
 
     # Remove the image URLs from the original content
     non_image_content = re.sub(image_url_pattern, "", content).strip()
@@ -263,6 +264,7 @@ def send_request():
                     top_p=1,
                     frequency_penalty=0,
                     presence_penalty=0,
+                    # response_format={"type": "json_object"},
                     stream=True,
                 ):
                     content = chunk["choices"][0].get("delta", {}).get("content")
@@ -671,6 +673,12 @@ def set_submit_button(active):
         submit_button_text.set("Cancel")
         submit_button.configure(command=cancel_streaming)
 
+def update_image_detail_visibility(*args):
+    if model_var.get() == "gpt-4-vision-preview":
+        image_detail_dropdown.grid(row=0, column=8, sticky="ne")
+    else:
+        image_detail_dropdown.grid_remove()
+
 # Initialize the main application window
 app = tk.Tk()
 app.geometry("800x600")
@@ -755,6 +763,7 @@ add_message("user", "")
 configuration_frame = ttk.Frame(app, padding="3")
 configuration_frame.grid(row=0, column=0, sticky="new")
 config_row = 0
+
 # Add a dropdown menu to select a chat log file to load
 chat_filename_var = tk.StringVar()
 chat_files = sorted(
@@ -781,6 +790,13 @@ orgid_var = tk.StringVar(value=openai.organization)
 apikey_var.trace("w", on_config_changed)
 orgid_var.trace("w", on_config_changed)
 
+# Add image detail dropdown
+image_detail_var = tk.StringVar(value="low")
+image_detail_dropdown = ttk.OptionMenu(main_frame, image_detail_var, "low", "low", "high")
+update_image_detail_visibility()
+
+# Update image detail visibility based on selected model
+model_var.trace("w", update_image_detail_visibility)
 # Create the hamburger menu button and bind it to the show_popup function
 hamburger_button = ttk.Button(configuration_frame, text="≡", command=show_popup)
 hamburger_button.grid(row=config_row, column=9, padx=10, pady=10, sticky="w")
