@@ -672,6 +672,58 @@ def update_image_detail_visibility(*args):
     else:
         image_detail_dropdown.grid_remove()
 
+def show_token_count():
+    messages = get_messages_from_chat_history()
+    num_input_tokens = count_tokens(messages, model_var.get())
+    num_output_tokens = max_length_var.get()
+    total_tokens = num_input_tokens + num_output_tokens
+    model = model_var.get()
+    
+    # Estimation for high detail image cost based on a 1024x1024 image
+    # todo: get the actual image sizes for a more accurate estimation
+    high_detail_cost_per_image = (170 * 4 + 85) / 1000 * 0.01  # 4 tiles for 1024x1024 + base tokens
+    
+    # Count the number of images in the messages
+    num_images = sum(1 for message in messages if "image_url" in message.get("content", ""))
+
+    # Pricing information per 1000 tokens
+    pricing_info = {
+        "gpt-4-1106-preview": {"input": 0.01, "output": 0.03},
+        "gpt-4-1106-vision-preview": {"input": 0.01, "output": 0.03},
+        "gpt-4-vision-preview": {"input": 0.01, "output": 0.03},
+        "gpt-4": {"input": 0.03, "output": 0.06},
+        "gpt-4-0613": {"input": 0.03, "output": 0.06},
+        "gpt-4-0314": {"input": 0.03, "output": 0.06},
+        "gpt-4-32k": {"input": 0.06, "output": 0.12},
+        "gpt-3.5-turbo": {"input": 0.0010, "output": 0.0020},
+        "gpt-3.5-turbo-0613": {"input": 0.0010, "output": 0.0020},
+        "gpt-3.5-turbo-0301": {"input": 0.0010, "output": 0.0020},
+        "gpt-3.5-turbo-16k": {"input": 0.0010, "output": 0.0020},
+        "gpt-3.5-turbo-1106": {"input": 0.0010, "output": 0.0020},
+        "gpt-3.5-turbo-instruct": {"input": 0.0015, "output": 0.0020},
+    }
+    
+    # Calculate vision cost if the model is vision preview
+    vision_cost = 0
+    if "vision" in model:
+        if image_detail_var.get() == "low":
+            # Fixed cost for low detail images
+            vision_cost_per_image = 0.00085
+            vision_cost = vision_cost_per_image * num_images
+        else:
+            # Estimated cost for high detail images
+            vision_cost = high_detail_cost_per_image * num_images
+        total_cost = vision_cost
+        cost_message = f"Vision Cost: ${total_cost:.5f} for {num_images} images"
+    else:
+        # Calculate input and output costs for non-vision models
+        input_cost = pricing_info[model]["input"] * num_input_tokens / 1000 if model in pricing_info else 0
+        output_cost = pricing_info[model]["output"] * num_output_tokens / 1000 if model in pricing_info else 0
+        total_cost = input_cost + output_cost
+        cost_message = f"Input Cost: ${input_cost:.5f}\nOutput Cost: ${output_cost:.5f}"
+    
+    messagebox.showinfo("Token Count and Cost", f"Number of tokens: {total_tokens} (Input: {num_input_tokens}, Output: {num_output_tokens})\n{cost_message}")
+
 # Initialize the main application window
 app = tk.Tk()
 app.geometry("800x600")
@@ -749,6 +801,10 @@ submit_button_text = tk.StringVar()  # Create a StringVar variable to control th
 submit_button_text.set("Submit")  # Set the initial text of the submit button to "Submit"
 submit_button = ttk.Button(main_frame, textvariable=submit_button_text, command=send_request)  # Use textvariable instead of text
 submit_button.grid(row=7, column=7, sticky="e")
+
+# Add a new button for counting tokens (new code)
+token_count_button = ttk.Button(main_frame, text="Count Tokens", command=show_token_count)
+token_count_button.grid(row=7, column=0, sticky="w")  # Place it on the bottom left, same row as 'Submit'
 
 add_message("user", "")
 
