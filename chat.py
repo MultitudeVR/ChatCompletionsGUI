@@ -202,7 +202,7 @@ def show_error_and_open_settings(message):
     show_error_popup(message)
 
 def parse_and_create_image_messages(content):
-    image_url_pattern = r"https?://[^\s]+?\.(?:jpg|jpeg|png|webp)"
+    image_url_pattern = r"https?://[^\s,\"\{\}]+"
     image_urls = re.findall(image_url_pattern, content, re.IGNORECASE)
 
     parts = re.split(image_url_pattern, content)
@@ -286,20 +286,29 @@ def send_request():
     Thread(target=request_thread).start()
   
 def update_chat_file_dropdown(new_file_path):
+    global chat_files  # Ensure chat_files is accessible globally
+    
+    # Refresh the list of chat files from the directory
+    chat_files = sorted(
+        [f for f in os.listdir("chat_logs") if os.path.isfile(os.path.join("chat_logs", f)) and f.endswith('.json')],
+        key=lambda x: os.path.getmtime(os.path.join("chat_logs", x)),
+        reverse=True
+    )
+    
     new_file_name = os.path.basename(new_file_path)
+    
+    # Check if the new file name is already in the list of chat files
     if new_file_name not in chat_files:
-        chat_files.append(new_file_name)
-        # Sort the list of chat files after appending the new file
-        chat_files.sort(
-            key=lambda x: os.path.getmtime(os.path.join("chat_logs", x)),
-            reverse=True
-        )
-        # Clear and repopulate the dropdown menu with sorted files
-        menu = chat_file_dropdown["menu"]
-        menu.delete(0, "end")
-        for file in chat_files:
-            menu.add_command(label=file, command=lambda value=file: chat_filename_var.set(value))
-    chat_filename_var.set(new_file_name)
+        chat_files.insert(0, new_file_name)  # Insert the file at the beginning if it's not there
+    
+    chat_filename_var.set(new_file_name)  # Select the newly created log
+
+    # Clear and repopulate the dropdown menu with the refreshed list of files
+    menu = chat_file_dropdown["menu"]
+    menu.delete(0, "end")
+    menu.add_command(label="<new-log>", command=lambda value="<new-log>": chat_filename_var.set(value))
+    for file in chat_files:
+        menu.add_command(label=file, command=lambda value=file: chat_filename_var.set(value))
 
 def load_chat_history():
     filename = chat_filename_var.get()
