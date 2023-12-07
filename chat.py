@@ -1,4 +1,6 @@
 import openai
+from openai import OpenAI, AsyncOpenAI
+
 import tkinter as tk
 from tkinter import ttk
 from tkinter import filedialog
@@ -68,8 +70,8 @@ if not os.path.exists(config_filename):
 config = configparser.ConfigParser()
 config.read(config_filename)
 
-openai.api_key = config.get("openai", "api_key", fallback="insert-key")
-openai.organization = config.get("openai", "organization", fallback="")
+client = OpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
+aclient = AsyncOpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
 
 is_streaming_cancelled = False
 
@@ -139,7 +141,7 @@ def count_tokens(messages, model):
                 num_tokens += tokens_per_name
     num_tokens += 3  # every reply is primed with <|start|>assistant<|message|>
     return num_tokens
-    
+
 def get_messages_from_chat_history():
     messages = [
         {"role": "system", "content": system_message_widget.get("1.0", tk.END).strip()}
@@ -152,7 +154,7 @@ def get_messages_from_chat_history():
             }
         )
     return messages
-    
+
 def request_file_name():
     # add to messages a system message informing the AI to create a title
     messages = get_messages_from_chat_history()
@@ -175,14 +177,11 @@ def request_file_name():
             if num_tokens <= 4096:
                 break
     # get completion
-    response = openai.ChatCompletion.create(
-      model="gpt-3.5-turbo",
-      messages=messages
-    )
+    response = client.chat.completions.create(model="gpt-3.5-turbo", messages=messages)
     # return the filename
-    suggested_filename = response["choices"][0]["message"]["content"].strip()
+    suggested_filename = response.choices[0].message.content.strip()
     return suggested_filename
-    
+
 def show_error_popup(message):
     error_popup = tk.Toplevel(app)
     error_popup.title("Error")
@@ -249,23 +248,21 @@ def send_request():
         async def streaming_chat_completion():
             global is_streaming_cancelled
             try:
-                async for chunk in await openai.ChatCompletion.acreate(
-                    model=model_var.get(),
-                    messages=messages,
-                    temperature=temperature_var.get(),
-                    max_tokens=max_length_var.get(),
-                    top_p=1,
-                    frequency_penalty=0,
-                    presence_penalty=0,
-                    # response_format={"type": "json_object"},
-                    stream=True,
-                ):
-                    content = chunk["choices"][0].get("delta", {}).get("content")
+                async for chunk in await aclient.chat.completions.create(model=model_var.get(),
+                messages=messages,
+                temperature=temperature_var.get(),
+                max_tokens=max_length_var.get(),
+                top_p=1,
+                frequency_penalty=0,
+                presence_penalty=0,
+                # response_format={"type": "json_object"},
+                stream=True):
+                    content = chunk.choices[0].delta.content
                     if content is not None:
                         app.after(0, add_to_last_message, content)
                     if is_streaming_cancelled:
                         break
-            except openai.error.AuthenticationError as e:
+            except openai.AuthenticationError as e:
                 if "Incorrect API key" in str(e):
                     error_message = "API key is incorrect, please configure it in the settings."
                 elif "No such organization" in str(e):
@@ -437,8 +434,10 @@ def configure_scrollregion(event):
     chat_frame.configure(scrollregion=chat_frame.bbox("all"))
 
 def save_api_key():
-    openai.api_key = apikey_var.get()
-    openai.organization = orgid_var.get()
+    global client, aclient
+    client = OpenAI(api_key=apikey_var.get(), organization=orgid_var.get())
+    aclient = AsyncOpenAI(api_key=apikey_var.get(), organization=orgid_var.get())
+
     config.set("openai", "api_key", openai.api_key)
     config.set("openai", "organization", openai.organization)
 
