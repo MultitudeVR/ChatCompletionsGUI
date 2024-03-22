@@ -17,6 +17,7 @@ from datetime import datetime
 import random
 import string
 import urllib.parse
+import anthropic
 
 class ToolTip:
     def __init__(self, widget, text):
@@ -65,6 +66,7 @@ if os_name == 'Linux' and "ANDROID_BOOTLOGO" in os.environ:
 if not os.path.exists(config_filename):
     with open(config_filename, "w") as f:
         f.write("[openai]\n")
+        f.write("[anthropic]\n")
         f.write("[app]\n")
 
 config = configparser.ConfigParser()
@@ -72,6 +74,7 @@ config.read(config_filename)
 
 client = OpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
 aclient = AsyncOpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
+anthropic_client = anthropic.Anthropic(api_key=config.get("anthropic", "api_key", fallback=""))
 
 is_streaming_cancelled = False
 
@@ -124,7 +127,7 @@ def count_tokens(messages, model):
     try:
         encoding = tiktoken.encoding_for_model(model)
     except KeyError:
-        print("Warning: model not found. Using cl100k_base encoding.")
+        print("Warning: model not found for token counter. Using cl100k_base encoding.")
         encoding = tiktoken.get_encoding("cl100k_base")
     if model == "gpt-3.5-turbo-0301":
         tokens_per_message = 4  # every message follows <|start|>{role/name}\n{content}<|end|>\n
@@ -220,9 +223,8 @@ def send_request():
     global is_streaming_cancelled
     # get messages
     messages = get_messages_from_chat_history()
-
     # check if too many tokens
-    model_max_context_window = (16384 if '16k' in model_var.get() else 128000 if model_var.get() == 'gpt-4-1106-preview' else 8192 if model_var.get().startswith('gpt-4') else 4096)
+    model_max_context_window = (16384 if ('16k' in model_var.get() or 'gpt-3.5-turbo-0125' in model_var.get() or 'claude' in model_var.get()) else 128000 if (model_var.get() == 'gpt-4-1106-preview' or model_var.get() == 'gpt-4-0125-preview') else 8192 if model_var.get().startswith('gpt-4') else 4096)
     num_prompt_tokens = count_tokens(messages, model_var.get())
     num_completion_tokens = int(max_length_var.get())
     if num_prompt_tokens + num_completion_tokens > model_max_context_window:
@@ -244,40 +246,78 @@ def send_request():
     # send request
     def request_thread():
         global is_streaming_cancelled
-
-        async def streaming_chat_completion():
-            global is_streaming_cancelled
-            try:
-                async for chunk in await aclient.chat.completions.create(model=model_var.get(),
-                messages=messages,
-                temperature=temperature_var.get(),
-                max_tokens=max_length_var.get(),
-                top_p=1,
-                frequency_penalty=0,
-                presence_penalty=0,
-                # response_format={"type": "json_object"},
-                stream=True):
-                    content = chunk.choices[0].delta.content
-                    if content is not None:
-                        app.after(0, add_to_last_message, content)
-                    if is_streaming_cancelled:
-                        break
-            except openai.AuthenticationError as e:
-                if "Incorrect API key" in str(e):
-                    error_message = "API key is incorrect, please configure it in the settings."
-                elif "No such organization" in str(e):
-                    error_message = "Organization not found, please configure it in the settings."
-                loop.call_soon_threadsafe(show_error_and_open_settings, error_message)
-            except Exception as e:
-                error_message = f"An unexpected error occurred: {e}"
-                loop.call_soon_threadsafe(show_error_popup, error_message)
-            if not is_streaming_cancelled:
-                app.after(0, add_empty_user_message)
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(streaming_chat_completion())
-
+        model_name = model_var.get()
+        if model_name.startswith("claude"):
+            # Streaming for Anthropic's Claude model
+            # Create a copy of messages for Anthropic API
+            # It has a bunch of extra requirements not present in OpenAI's API
+            anthropic_messages = []
+            system_content = ""
+            for message in messages:
+                if message["role"] == "system":
+                    system_content += message["content"] + "\n"
+                elif message["content"]:
+                    anthropic_messages.append({"role": message["role"], "content": message["content"]})
+            if len(anthropic_messages) == 0 or anthropic_messages[0]["role"] == "assistant":
+                anthropic_messages.insert(0, {"role": "user", "content": "<no message>"})
+            for i in range(len(anthropic_messages) - 1, 0, -1):
+                if anthropic_messages[i]["role"] == anthropic_messages[i - 1]["role"]:
+                    anthropic_messages.insert(i, {"role": "user" if anthropic_messages[i]["role"] == "assistant" else "assistant", "content": "<no message>"})
+            if anthropic_messages[-1]["role"] == "assistant":
+                anthropic_messages.append({"role": "user", "content": "<no message>"})
+            async def streaming_anthropic_chat_completion():
+                global is_streaming_cancelled
+                try:
+                    with anthropic_client.messages.stream(
+                        model=model_name,
+                        max_tokens=min(max_length_var.get(), 4000),
+                        messages=anthropic_messages,
+                        system=system_content.strip()
+                    ) as stream:
+                        for text in stream.text_stream:
+                            app.after(0, add_to_last_message, text)
+                            if is_streaming_cancelled:
+                                break
+                except Exception as e:
+                    error_message = f"An unexpected error occurred: {e}"
+                    loop.call_soon_threadsafe(show_error_popup, error_message)
+                if not is_streaming_cancelled:
+                    app.after(0, add_empty_user_message)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(streaming_anthropic_chat_completion())
+        else:
+            # Existing streaming code for OpenAI models
+            async def streaming_chat_completion():
+                global is_streaming_cancelled
+                try:
+                    async for chunk in await aclient.chat.completions.create(model=model_name,
+                    messages=messages,
+                    temperature=temperature_var.get(),
+                    max_tokens=max_length_var.get(),
+                    top_p=1,
+                    frequency_penalty=0,
+                    presence_penalty=0,
+                    stream=True):
+                        content = chunk.choices[0].delta.content
+                        if content is not None:
+                            app.after(0, add_to_last_message, content)
+                        if is_streaming_cancelled:
+                            break
+                except openai.AuthenticationError as e:
+                    if "Incorrect API key" in str(e):
+                        error_message = "API key is incorrect, please configure it in the settings."
+                    elif "No such organization" in str(e):
+                        error_message = "Organization not found, please configure it in the settings."
+                    loop.call_soon_threadsafe(show_error_and_open_settings, error_message)
+                except Exception as e:
+                    error_message = f"An unexpected error occurred: {e}"
+                    loop.call_soon_threadsafe(show_error_popup, error_message)
+                if not is_streaming_cancelled:
+                    app.after(0, add_empty_user_message)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(streaming_chat_completion())
     is_streaming_cancelled = False
     set_submit_button(False)
     Thread(target=request_thread).start()
@@ -443,12 +483,15 @@ def configure_scrollregion(event):
     chat_frame.configure(scrollregion=chat_frame.bbox("all"))
 
 def save_api_key():
-    global client, aclient
-    client = OpenAI(api_key=apikey_var.get(), organization=orgid_var.get())
-    aclient = AsyncOpenAI(api_key=apikey_var.get(), organization=orgid_var.get())
-
-    config.set("openai", "api_key", openai.api_key)
-    config.set("openai", "organization", openai.organization)
+    global client, aclient, anthropic_client
+    if apikey_var.get() != "":
+        client = OpenAI(api_key=apikey_var.get(), organization=orgid_var.get())
+        aclient = AsyncOpenAI(api_key=apikey_var.get(), organization=orgid_var.get())
+        config.set("openai", "api_key", client.api_key)
+        config.set("openai", "organization", client.organization)
+    if anthropic_apikey_var.get() != "":
+        anthropic_client = anthropic.Anthropic(api_key=anthropic_apikey_var.get())
+        config.set("anthropic", "api_key", anthropic_client.api_key)
 
     with open("config.ini", "w") as config_file:
         config.write(config_file)
@@ -644,6 +687,11 @@ def show_popup():
     orgid_entry = ttk.Entry(popup_frame, textvariable=orgid_var, width=60)
     orgid_entry.grid(row=1, column=1, sticky="e")
 
+    # Add Anthropic API key configuration
+    ttk.Label(popup_frame, text="Anthropic API Key:").grid(row=2, column=0, sticky="e")
+    anthropic_apikey_entry = ttk.Entry(popup_frame, textvariable=anthropic_apikey_var, width=60)
+    anthropic_apikey_entry.grid(row=2, column=1, sticky="e")
+
     # Create a Checkbutton widget for dark mode toggle
     dark_mode_var.set(load_dark_mode_state())
     dark_mode_checkbutton = ttk.Checkbutton(popup_frame, text="Dark mode", variable=dark_mode_var, command=toggle_dark_mode)
@@ -703,6 +751,7 @@ def show_token_count():
         "gpt-4-0613": {"input": 0.03, "output": 0.06},
         "gpt-4-0314": {"input": 0.03, "output": 0.06},
         "gpt-4-32k": {"input": 0.06, "output": 0.12},
+        "gpt-3.5-turbo-0125": {"input": 0.0005, "output": 0.0015},
         "gpt-3.5-turbo": {"input": 0.0010, "output": 0.0020},
         "gpt-3.5-turbo-0613": {"input": 0.0010, "output": 0.0020},
         "gpt-3.5-turbo-0301": {"input": 0.0010, "output": 0.0020},
@@ -757,7 +806,7 @@ system_message_widget.insert(tk.END, system_message.get())
 
 model_var = tk.StringVar(value="gpt-4")
 ttk.Label(main_frame, text="Model:").grid(row=0, column=6, sticky="ne")
-ttk.OptionMenu(main_frame, model_var, "gpt-4-1106-preview", "gpt-4-1106-preview", "gpt-4", "gpt-3.5-turbo", "gpt-4-vision-preview", "gpt-3.5-turbo-16k", "gpt-3.5-turbo-0301", "gpt-4-0314", "gpt-3.5-turbo-0613", "gpt-4-0613").grid(row=0, column=7, sticky="nw")
+ttk.OptionMenu(main_frame, model_var, "gpt-4-0125-preview", "gpt-4-0125-preview", "gpt-4-1106-preview", "gpt-4", "gpt-4-vision-preview", "gpt-3.5-turbo-0125", "gpt-3.5-turbo", "gpt-3.5-turbo-16k", "gpt-3.5-turbo-0301", "gpt-4-0314", "gpt-3.5-turbo-0613", "gpt-4-0613", "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307", "claude-2.1", "claude-2.0", "claude-instant-1.2").grid(row=0, column=7, sticky="nw")
 
 # Add sliders for temperature, max length, and top p
 temperature_var = tk.DoubleVar(value=0.7)
@@ -842,10 +891,13 @@ load_button.grid(row=config_row, column=2, sticky="w")
 save_button = ttk.Button(configuration_frame, text="Save Chat", command=save_chat_history)
 save_button.grid(row=config_row, column=3, sticky="w")
 
-apikey_var = tk.StringVar(value=openai.api_key)
-orgid_var = tk.StringVar(value=openai.organization)
+apikey_var = tk.StringVar(value=client.api_key)
+orgid_var = tk.StringVar(value=client.organization)
+anthropic_apikey_var = tk.StringVar(value=anthropic_client.api_key)
+
 apikey_var.trace("w", on_config_changed)
 orgid_var.trace("w", on_config_changed)
+anthropic_apikey_var.trace("w", on_config_changed)
 
 # Add image detail dropdown
 image_detail_var = tk.StringVar(value="low")
