@@ -55,22 +55,33 @@ class ToolTip:
         if self.tooltip_window:
             self.tooltip_window.destroy()
             self.tooltip_window = None
-            
-            
-config_filename = "config.ini"
-system_message_default_text = "You are a helpful assistant."
-os_name = platform.system()
-if os_name == 'Linux' and "ANDROID_BOOTLOGO" in os.environ:
-	os_name = 'Android'
 
+# configure config file
+config_filename = "config.ini"
 if not os.path.exists(config_filename):
     with open(config_filename, "w") as f:
         f.write("[openai]\n")
         f.write("[anthropic]\n")
         f.write("[app]\n")
-
 config = configparser.ConfigParser()
 config.read(config_filename)
+if not config.has_section("openai"):
+    config.add_section("openai")
+    with open(config_filename, "w") as f:
+        config.write(f)
+if not config.has_section("anthropic"):
+    config.add_section("anthropic")
+    with open(config_filename, "w") as f:
+        config.write(f)
+if not config.has_section("app"):
+    config.add_section("app")
+    with open(config_filename, "w") as f:
+        config.write(f)
+
+system_message_default_text = "You are a helpful assistant."
+os_name = platform.system()
+if os_name == 'Linux' and "ANDROID_BOOTLOGO" in os.environ:
+	os_name = 'Android'
 
 client = OpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
 aclient = AsyncOpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
@@ -599,39 +610,44 @@ def get_default_bg_color(root):
     return default_bg_color
 
 def on_close():
-   # Generate a timestamp string with the format "YYYYMMDD_HHMMSS"
-   timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-   # Generate a random 6-character alphanumeric ID
-   random_id = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
-   # Combine the timestamp and random ID to create the filename
-   filename = f"{timestamp}_{random_id}.json"
+    # Generate a timestamp string with the format "YYYYMMDD_HHMMSS"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Generate a random 6-character alphanumeric ID
+    random_id = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
+    # Combine the timestamp and random ID to create the filename
+    filename = f"{timestamp}_{random_id}.json"
 
-   # Create the 'temp/backup/' directory if it doesn't exist
-   backup_path = "temp/backup"
-   if not os.path.exists(backup_path):
-       os.makedirs(backup_path)
+    # Create the 'temp/backup/' directory if it doesn't exist
+    backup_path = "temp/backup"
+    if not os.path.exists(backup_path):
+        os.makedirs(backup_path)
 
    # Construct the full file path
-   file_path = os.path.join(backup_path, filename)
+    file_path = os.path.join(backup_path, filename)
 
    # Get the chat history data
-   chat_data = {
-       "system_message": system_message_widget.get("1.0", tk.END).strip(),
-       "chat_history": [
-           {
-               "role": message["role"].get(),
-               "content": message["content_widget"].get("1.0", tk.END).strip()
-           }
-           for message in chat_history
-       ]
-   }
+    chat_data = {
+        "system_message": system_message_widget.get("1.0", tk.END).strip(),
+        "chat_history": [
+            {
+                "role": message["role"].get(),
+                "content": message["content_widget"].get("1.0", tk.END).strip()
+            }
+            for message in chat_history
+        ]
+    }
+   
+    # Save the chat history to the file
+    with open(file_path, "w", encoding='utf-8') as f:
+        json.dump(chat_data, f, indent=4)
 
-   # Save the chat history to the file
-   with open(file_path, "w", encoding='utf-8') as f:
-       json.dump(chat_data, f, indent=4)
+    # Save the last used model
+    config.set("app", "last_used_model", model_var.get())
+    with open("config.ini", "w") as config_file:
+        config.write(config_file)
 
-   # Close the application
-   app.destroy()
+    # Close the application
+    app.destroy()
 
 popup = None
 popup_frame = None
@@ -812,9 +828,12 @@ system_message_widget = tk.Text(main_frame, wrap=tk.WORD, height=5, width=50, un
 system_message_widget.grid(row=0, column=1, sticky="we", pady=3)
 system_message_widget.insert(tk.END, system_message.get())
 
-model_var = tk.StringVar(value="gpt-4")
+last_used_model = config.get("app", "last_used_model", fallback="gpt-4-0125-preview")
+model_var = tk.StringVar(value=last_used_model)
 ttk.Label(main_frame, text="Model:").grid(row=0, column=6, sticky="ne")
-ttk.OptionMenu(main_frame, model_var, "claude-3-opus-20240229",  "claude-3-opus-20240229",  "gpt-4-0125-preview", "gpt-4-1106-preview", "gpt-4", "gpt-4-vision-preview", "gpt-3.5-turbo-0125", "gpt-3.5-turbo", "gpt-3.5-turbo-16k", "gpt-3.5-turbo-0301", "gpt-4-0314", "gpt-3.5-turbo-0613", "gpt-4-0613", "claude-3-sonnet-20240229", "claude-3-haiku-20240307", "claude-2.1", "claude-2.0", "claude-instant-1.2").grid(row=0, column=7, sticky="nw")
+possible_models = ["claude-3-opus-20240229",  "gpt-4-0125-preview", "gpt-4-1106-preview", "gpt-4", "gpt-4-vision-preview", "gpt-3.5-turbo-0125", "gpt-3.5-turbo", "gpt-3.5-turbo-16k", "gpt-3.5-turbo-0301", "gpt-4-0314", "gpt-3.5-turbo-0613", "gpt-4-0613", "claude-3-sonnet-20240229", "claude-3-haiku-20240307", "claude-2.1", "claude-2.0", "claude-instant-1.2"]
+filtered_models = [model for model in possible_models if model != last_used_model]
+ttk.OptionMenu(main_frame, model_var, last_used_model, last_used_model, *filtered_models).grid(row=0, column=7, sticky="nw")
 
 # Add sliders for temperature, max length, and top p
 temperature_var = tk.DoubleVar(value=0.7)
