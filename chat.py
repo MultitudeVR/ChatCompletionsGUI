@@ -272,7 +272,8 @@ def send_request():
                         model=model_name,
                         max_tokens=min(max_length_var.get(), 4000),
                         messages=anthropic_messages,
-                        system=system_content.strip()
+                        system=system_content.strip(),
+                        temperature=temperature_var.get()
                     ) as stream:
                         for text in stream.text_stream:
                             app.after(0, add_to_last_message, text)
@@ -744,6 +745,7 @@ def show_token_count():
 
     # Pricing information per 1000 tokens
     pricing_info = {
+        "gpt-4-0125-preview": {"input": 0.01, "output": 0.03},
         "gpt-4-1106-preview": {"input": 0.01, "output": 0.03},
         "gpt-4-1106-vision-preview": {"input": 0.01, "output": 0.03},
         "gpt-4-vision-preview": {"input": 0.01, "output": 0.03},
@@ -758,6 +760,12 @@ def show_token_count():
         "gpt-3.5-turbo-16k": {"input": 0.0010, "output": 0.0020},
         "gpt-3.5-turbo-1106": {"input": 0.0010, "output": 0.0020},
         "gpt-3.5-turbo-instruct": {"input": 0.0015, "output": 0.0020},
+        "claude-3-opus-20240229": {"input": 0.015, "output": 0.075},
+        "claude-3-sonnet-20240229": {"input": 0.003, "output": 0.015},
+        "claude-3-haiku-20240307": {"input": 0.00025, "output": 0.00125},
+        "claude-2.1": {"input": 0.008, "output": 0.024},
+        "claude-2.0": {"input": 0.008, "output": 0.024},
+        "claude-instant-1.2": {"input": 0.0008, "output": 0.0024},
     }
     
     # Calculate vision cost if the model is vision preview
@@ -806,7 +814,7 @@ system_message_widget.insert(tk.END, system_message.get())
 
 model_var = tk.StringVar(value="gpt-4")
 ttk.Label(main_frame, text="Model:").grid(row=0, column=6, sticky="ne")
-ttk.OptionMenu(main_frame, model_var, "gpt-4-0125-preview", "gpt-4-0125-preview", "gpt-4-1106-preview", "gpt-4", "gpt-4-vision-preview", "gpt-3.5-turbo-0125", "gpt-3.5-turbo", "gpt-3.5-turbo-16k", "gpt-3.5-turbo-0301", "gpt-4-0314", "gpt-3.5-turbo-0613", "gpt-4-0613", "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307", "claude-2.1", "claude-2.0", "claude-instant-1.2").grid(row=0, column=7, sticky="nw")
+ttk.OptionMenu(main_frame, model_var, "claude-3-opus-20240229",  "claude-3-opus-20240229",  "gpt-4-0125-preview", "gpt-4-1106-preview", "gpt-4", "gpt-4-vision-preview", "gpt-3.5-turbo-0125", "gpt-3.5-turbo", "gpt-3.5-turbo-16k", "gpt-3.5-turbo-0301", "gpt-4-0314", "gpt-3.5-turbo-0613", "gpt-4-0613", "claude-3-sonnet-20240229", "claude-3-haiku-20240307", "claude-2.1", "claude-2.0", "claude-instant-1.2").grid(row=0, column=7, sticky="nw")
 
 # Add sliders for temperature, max length, and top p
 temperature_var = tk.DoubleVar(value=0.7)
