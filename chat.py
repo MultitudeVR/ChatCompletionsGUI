@@ -86,7 +86,25 @@ if os_name == 'Linux' and "ANDROID_BOOTLOGO" in os.environ:
 client = OpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
 aclient = AsyncOpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
 anthropic_client = anthropic.Anthropic(api_key=config.get("anthropic", "api_key", fallback=""))
-
+vision_models = ['gpt-4-vision-preview', 'gpt-4-1106-vision-preview', 'gpt-4-turbo', 'gpt-4-turbo-2024-04-09']
+openai_models = [
+    "gpt-3.5-turbo",
+    "gpt-4-turbo",
+    "gpt-4",
+    "gpt-4-32k",
+    "gpt-4-turbo-preview",
+    "gpt-4-vision-preview",
+    "gpt-4-0125-preview",
+    "gpt-4-0613",
+    "gpt-4-1106-preview",
+    "gpt-4-1106-vision-preview",
+    "gpt-3.5-turbo-16k",
+    "gpt-3.5-turbo-0125",
+    "gpt-3.5-turbo-0301",
+    "gpt-3.5-turbo-0613",
+    "gpt-3.5-turbo-1106",
+    "gpt-3.5-turbo-16k-0613",
+]
 is_streaming_cancelled = False
 
 if not os.path.exists("chat_logs"):
@@ -242,7 +260,7 @@ def send_request():
         show_error_popup(f"combined prompt and completion tokens ({num_prompt_tokens} + {num_completion_tokens} = {num_prompt_tokens+num_completion_tokens}) exceeds this model's maximum context window of {model_max_context_window}.")
         return
     # convert messages to image api format, if necessary
-    if model_var.get() == "gpt-4-vision-preview":
+    if model_var.get() in vision_models:
         # Update the messages to include image data if any image URLs are found in the user's input
         new_messages = []
         for message in messages:
@@ -740,7 +758,7 @@ def set_submit_button(active):
         submit_button.configure(command=cancel_streaming)
 
 def update_image_detail_visibility(*args):
-    if model_var.get() == "gpt-4-vision-preview":
+    if model_var.get() in vision_models:
         image_detail_dropdown.grid(row=0, column=8, sticky="ne")
     else:
         image_detail_dropdown.grid_remove()
@@ -751,16 +769,10 @@ def show_token_count():
     num_output_tokens = max_length_var.get()
     total_tokens = num_input_tokens + num_output_tokens
     model = model_var.get()
-    
-    # Estimation for high detail image cost based on a 1024x1024 image
-    # todo: get the actual image sizes for a more accurate estimation
-    high_detail_cost_per_image = (170 * 4 + 85) / 1000 * 0.01  # 4 tiles for 1024x1024 + base tokens
-    
-    # Count the number of images in the messages
-    num_images = sum(1 for message in messages if "image_url" in message.get("content", ""))
-
     # Pricing information per 1000 tokens
     pricing_info = {
+        "gpt-4-turbo": {"input": 0.01, "output": 0.03},
+        "gpt-4-turbo-2024-04-09": {"input": 0.01, "output": 0.03},
         "gpt-4-0125-preview": {"input": 0.01, "output": 0.03},
         "gpt-4-1106-preview": {"input": 0.01, "output": 0.03},
         "gpt-4-1106-vision-preview": {"input": 0.01, "output": 0.03},
@@ -784,9 +796,28 @@ def show_token_count():
         "claude-instant-1.2": {"input": 0.0008, "output": 0.0024},
     }
     
-    # Calculate vision cost if the model is vision preview
-    vision_cost = 0
-    if "vision" in model:
+
+    # Calculate input and output costs for non-vision models
+    input_cost = pricing_info[model]["input"] * num_input_tokens / 1000 if model in pricing_info else 0
+    output_cost = pricing_info[model]["output"] * num_output_tokens / 1000 if model in pricing_info else 0
+    total_cost = input_cost + output_cost
+    cost_message = f"Input Cost: ${input_cost:.5f}\nOutput Cost: ${output_cost:.5f}"
+
+    if model in vision_models:
+        # Estimation for high detail image cost based on a 1024x1024 image
+        # todo: get the actual image sizes for a more accurate estimation
+        high_detail_cost_per_image = (170 * 4 + 85) / 1000 * 0.01  # 4 tiles for 1024x1024 + base tokens
+
+        # Count the number of images in the messages
+        num_images = 0
+        parsed_messages = [parse_and_create_image_messages(message.get("content","")) for message in messages]
+        for message in parsed_messages:
+            for content in message["content"]:
+                if "image_url" in content.get("type", ""):
+                    num_images+=1
+
+        # Calculate vision cost if the model is vision preview
+        vision_cost = 0
         if image_detail_var.get() == "low":
             # Fixed cost for low detail images
             vision_cost_per_image = 0.00085
@@ -795,13 +826,7 @@ def show_token_count():
             # Estimated cost for high detail images
             vision_cost = high_detail_cost_per_image * num_images
         total_cost = vision_cost
-        cost_message = f"Vision Cost: ${total_cost:.5f} for {num_images} images"
-    else:
-        # Calculate input and output costs for non-vision models
-        input_cost = pricing_info[model]["input"] * num_input_tokens / 1000 if model in pricing_info else 0
-        output_cost = pricing_info[model]["output"] * num_output_tokens / 1000 if model in pricing_info else 0
-        total_cost = input_cost + output_cost
-        cost_message = f"Input Cost: ${input_cost:.5f}\nOutput Cost: ${output_cost:.5f}"
+        cost_message += f"\nVision Cost: ${total_cost:.5f} for {num_images} images"
     
     messagebox.showinfo("Token Count and Cost", f"Number of tokens: {total_tokens} (Input: {num_input_tokens}, Output: {num_output_tokens})\n{cost_message}")
 
@@ -828,10 +853,12 @@ system_message_widget = tk.Text(main_frame, wrap=tk.WORD, height=5, width=50, un
 system_message_widget.grid(row=0, column=1, sticky="we", pady=3)
 system_message_widget.insert(tk.END, system_message.get())
 
-last_used_model = config.get("app", "last_used_model", fallback="gpt-4-0125-preview")
+last_used_model = config.get("app", "last_used_model", fallback="gpt-4-turbo")
 model_var = tk.StringVar(value=last_used_model)
 ttk.Label(main_frame, text="Model:").grid(row=0, column=6, sticky="ne")
-possible_models = ["claude-3-opus-20240229",  "gpt-4-0125-preview", "gpt-4-1106-preview", "gpt-4", "gpt-4-vision-preview", "gpt-3.5-turbo-0125", "gpt-3.5-turbo", "gpt-3.5-turbo-16k", "gpt-3.5-turbo-0301", "gpt-4-0314", "gpt-3.5-turbo-0613", "gpt-4-0613", "claude-3-sonnet-20240229", "claude-3-haiku-20240307", "claude-2.1", "claude-2.0", "claude-instant-1.2"]
+# openai_models = [model.id for model in client.models.list() if ('gpt' in model.id and 'instruct' not in model.id)]
+# openai_models.sort()
+possible_models = [*openai_models, "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307", "claude-2.1", "claude-2.0", "claude-instant-1.2"]
 filtered_models = [model for model in possible_models if model != last_used_model]
 ttk.OptionMenu(main_frame, model_var, last_used_model, last_used_model, *filtered_models).grid(row=0, column=7, sticky="nw")
 
