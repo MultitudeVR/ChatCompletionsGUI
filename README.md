@@ -9,13 +9,10 @@ This is a simple Graphical User Interface (GUI) application for working with the
 ### Prerequisites
 
 - Python 3.7 or higher (If installing from source)
-- An OpenAI API key (get one from https://beta.openai.com/signup/)
+- An OpenAI API key
+- (Optional) An Anthropic API key
 
-### Installing
-
-There are two methods to install Chat Completions GUI:
-
-#### Method 1: Installing from Source
+### Installing from Source
 
 1. Clone the repository:
 
@@ -32,44 +29,19 @@ There are two methods to install Chat Completions GUI:
 
     `python chat.py`
 
-After installation, enter your OpenAI API key and Organization ID (if applicable) in the configuration fields, and click "Save API Key".
+    **Note for Mac users:** If you get an error about a missing package, you may need to install `python-tk`. This can be done by executing `brew install python-tk` in your terminal. And if that doesn't work, you may need to specify your python version (i.e. `brew install python-tk@3.12`).
 
-#### Method 2: Windows Executable
-
-For Windows users, download the executable file from the [GitHub release page](https://github.com/MultitudeVR/ChatCompletionsGUI/releases/tag/v1.0.0). Simply run the downloaded executable to launch the application.
-
-Note that application startup time is somewhat slow when running from the .exe (it takes approximately 10 seconds).
-
-Also note that this is an old version of the gui.
+After installation, enter your OpenAI API key and Organization ID (if applicable) in the configuration fields.
 
 ## Features
 
-- Interact with GPT-3.5-turbo, GPT-4, and GPT-4-turbo models
+- Interact with openai and anthropic models
 - Easily add, edit, and delete chat messages
 - Save and load chat logs in JSON format
 - Image analysis via vision API (currently supports web links only)
 - Customizable system message and model selection
 - Customizable temperature and max response length settings
 - Windows, Mac, Linux, and Android support
-
-## Latest Changes
-
-11/6/23
-- Implemented vision API which currently supports image analysis via web links
-- Added the new gpt-4-turbo model
-- Chat logs are now saved automatically on-close in the `/temp/backup/` folder
-- Chat logs are now saved as JSON. A conversion script has been added to convert old format logs
-- Chat logs are now sorted by date
-- Removed the concept of an 'important message' as well as the sliding context window feature
-- Set default max length for messages to 4000
-- Made token counting more accurate using tiktoken
-- Enabled 'undo' on message text contents
-
-8/14/23
-- Added support for system messages besides the first one
-
-7/21/23
-- Added Mac support
 
 ## License
 
