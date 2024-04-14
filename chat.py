@@ -444,7 +444,7 @@ def update_entry_widths(event=None):
     screen_width = app.winfo_screenwidth()
     dpi = app.winfo_fpixels('1i')
     if os.name == 'posix':
-        scaling_factor = 0.08 * (96/dpi)
+        scaling_factor = 0.09 * (96/dpi)
     else:
         scaling_factor = 0.12 * (96/dpi)
     # Calculate the new width of the Text widgets based on the window width
