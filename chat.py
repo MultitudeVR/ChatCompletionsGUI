@@ -18,6 +18,7 @@ import random
 import string
 import urllib.parse
 import anthropic
+import requests
 
 class ToolTip:
     def __init__(self, widget, text):
@@ -233,20 +234,33 @@ def show_error_and_open_settings(message):
     show_error_popup(message)
 
 def parse_and_create_image_messages(content):
-    image_url_pattern = r"https?://[^\s,\"\{\}]+"
-    image_urls = re.findall(image_url_pattern, content, re.IGNORECASE)
+    url_pattern = r"(https?://[^\s,\"\{\}]+)"
+    parts = re.split(url_pattern, content)
 
-    parts = re.split(image_url_pattern, content)
     messages = []
-
-    for i, text in enumerate(parts):
-        text = text.strip()
-        if text:
+    for text in parts:
+        if is_image_url(text):
+            messages.append({"type": "image_url", "image_url": {"url": text, "detail": image_detail_var.get()}})
+        elif messages and messages[-1].get("type") == "text":
+            messages[-1]["text"] += text
+        elif text:
             messages.append({"type": "text", "text": text})
-        if i < len(image_urls):
-            messages.append({"type": "image_url", "image_url": {"url": image_urls[i], "detail": image_detail_var.get()}})
-
     return {"role": "user", "content": messages}
+
+def is_url(str):
+    url_pattern = r"https?://[^\s,\"\{\}]+"
+    return re.match(url_pattern, str)
+
+def is_image_url(url):
+    if not is_url(url):
+        return False
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.head(url, timeout=5, headers=headers)
+        content_type = response.headers.get('Content-Type', '')
+        return 'image' in content_type
+    except requests.RequestException as e:
+        return False
 
 def send_request():
     global is_streaming_cancelled
