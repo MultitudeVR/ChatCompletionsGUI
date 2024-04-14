@@ -58,6 +58,52 @@ class ToolTip:
             self.tooltip_window.destroy()
             self.tooltip_window = None
 
+os_name = platform.system()
+if os_name == 'Linux' and "ANDROID_BOOTLOGO" in os.environ:
+	os_name = 'Android'
+
+if not os.path.exists("chat_logs"):
+    os.makedirs("chat_logs")
+
+
+# Hide console window on Windows
+if os.name == 'nt':
+    import ctypes
+    ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
+
+# configure config file
+config_filename = "config.ini"
+if not os.path.exists(config_filename):
+    with open(config_filename, "w") as f:
+        f.write("[openai]\n")
+        f.write("[anthropic]\n")
+        f.write("[custom_server]\n")
+        f.write("[app]\n")
+config = configparser.ConfigParser()
+config.read(config_filename)
+if not config.has_section("openai"):
+    config.add_section("openai")
+    with open(config_filename, "w") as f:
+        config.write(f)
+if not config.has_section("anthropic"):
+    config.add_section("anthropic")
+    with open(config_filename, "w") as f:
+        config.write(f)
+if not config.has_section("custom_server"):
+    config.add_section("custom_server")
+    with open(config_filename, "w") as f:
+        config.write(f)
+if not config.has_section("app"):
+    config.add_section("app")
+    config.set("app", "dark_mode", "False")
+    with open(config_filename, "w") as f:
+        config.write(f)
+
+client = OpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
+aclient = AsyncOpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
+anthropic_client = anthropic.Anthropic(api_key=config.get("anthropic", "api_key", fallback=""))
+custom_aclient = AsyncOpenAI(base_url = config.get("custom_server", "base_url", fallback=""), api_key=config.get("custom_server", "api_key", fallback="ollama"),)
+
 system_message_default_text = "You are a helpful assistant."
 vision_models = ['gpt-4-vision-preview', 'gpt-4-1106-vision-preview', 'gpt-4-turbo', 'gpt-4-turbo-2024-04-09']
 openai_models = [
@@ -78,12 +124,8 @@ openai_models = [
     "gpt-3.5-turbo-1106",
     "gpt-3.5-turbo-16k-0613",
 ]
-os_name = platform.system()
-if os_name == 'Linux' and "ANDROID_BOOTLOGO" in os.environ:
-	os_name = 'Android'
-
-if not os.path.exists("chat_logs"):
-    os.makedirs("chat_logs")
+custom_models = [model.strip() for model in config.get("custom_server", "models", fallback="").split(",")]
+custom_models = [model for model in custom_models if model]
 
 class MainWindow:
     def __init__(self, root):
@@ -93,38 +135,6 @@ class MainWindow:
         self.app.title("Chat Completions GUI")
 
         self.is_streaming_cancelled = False
-
-        # Hide console window on Windows
-        if os.name == 'nt':
-            import ctypes
-            ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
-
-        # configure config file
-        self.config_filename = "config.ini"
-        if not os.path.exists(self.config_filename):
-            with open(self.config_filename, "w") as f:
-                f.write("[openai]\n")
-                f.write("[anthropic]\n")
-                f.write("[app]\n")
-        self.config = configparser.ConfigParser()
-        self.config.read(self.config_filename)
-        if not self.config.has_section("openai"):
-            self.config.add_section("openai")
-            with open(self.config_filename, "w") as f:
-                self.config.write(f)
-        if not self.config.has_section("anthropic"):
-            self.config.add_section("anthropic")
-            with open(self.config_filename, "w") as f:
-                self.config.write(f)
-        if not self.config.has_section("app"):
-            self.config.add_section("app")
-            with open(self.config_filename, "w") as f:
-                self.config.write(f)
-        self.add_app_section_to_config_if_not_present();
-
-        self.client = OpenAI(api_key=self.config.get("openai", "api_key", fallback="insert-key"), organization=self.config.get("openai", "organization", fallback=""))
-        self.aclient = AsyncOpenAI(api_key=self.config.get("openai", "api_key", fallback="insert-key"), organization=self.config.get("openai", "organization", fallback=""))
-        self.anthropic_client = anthropic.Anthropic(api_key=self.config.get("anthropic", "api_key", fallback=""))
 
         # Create the main_frame for holding the chat and other widgets
         self.main_frame = ttk.Frame(self.app, padding="10")
@@ -137,12 +147,12 @@ class MainWindow:
         self.system_message_widget.grid(row=0, column=1, sticky="we", pady=3)
         self.system_message_widget.insert(tk.END, system_message.get())
 
-        last_used_model = self.config.get("app", "last_used_model", fallback="gpt-4-turbo")
+        last_used_model = config.get("app", "last_used_model", fallback="gpt-4-turbo")
         self.model_var = tk.StringVar(value=last_used_model)
         ttk.Label(self.main_frame, text="Model:").grid(row=0, column=6, sticky="ne")
         # openai_models = [model.id for model in client.models.list() if ('gpt' in model.id and 'instruct' not in model.id)]
         # openai_models.sort()
-        possible_models = [*openai_models, "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307", "claude-2.1", "claude-2.0", "claude-instant-1.2"]
+        possible_models = [*openai_models, "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307", "claude-2.1", "claude-2.0", "claude-instant-1.2", *custom_models]
         filtered_models = [model for model in possible_models if model != last_used_model]
         ttk.OptionMenu(self.main_frame, self.model_var, last_used_model, last_used_model, *filtered_models).grid(row=0, column=7, sticky="nw")
 
@@ -229,9 +239,9 @@ class MainWindow:
         self.save_button = ttk.Button(self.configuration_frame, text="Save Chat", command=self.save_chat_history)
         self.save_button.grid(row=config_row, column=3, sticky="w")
 
-        self.apikey_var = tk.StringVar(value=self.client.api_key)
-        self.orgid_var = tk.StringVar(value=self.client.organization)
-        self.anthropic_apikey_var = tk.StringVar(value=self.anthropic_client.api_key)
+        self.apikey_var = tk.StringVar(value=client.api_key)
+        self.orgid_var = tk.StringVar(value=client.organization)
+        self.anthropic_apikey_var = tk.StringVar(value=anthropic_client.api_key)
 
         self.apikey_var.trace("w", self.on_config_changed)
         self.orgid_var.trace("w", self.on_config_changed)
@@ -394,7 +404,7 @@ class MainWindow:
                 if num_tokens <= 4096:
                     break
         # get completion
-        response = self.client.chat.completions.create(model="gpt-3.5-turbo", messages=messages)
+        response = client.chat.completions.create(model="gpt-3.5-turbo", messages=messages)
         # return the filename
         suggested_filename = response.choices[0].message.content.strip()
         return suggested_filename
@@ -491,21 +501,23 @@ class MainWindow:
                 if anthropic_messages[-1]["role"] == "assistant":
                     anthropic_messages.append({"role": "user", "content": "<no message>"})
                 async def streaming_anthropic_chat_completion():
-                    try:
-                        with self.anthropic_client.messages.stream(
+                    with anthropic_client.messages.stream(
                             model=model_name,
                             max_tokens=min(self.max_length_var.get(), 4000),
                             messages=anthropic_messages,
                             system=system_content.strip(),
                             temperature=self.temperature_var.get()
                         ) as stream:
+                        try:
                             for text in stream.text_stream:
                                 self.app.after(0, self.add_to_last_message, text)
                                 if self.is_streaming_cancelled:
                                     break
-                    except Exception as e:
-                        error_message = f"An unexpected error occurred: {e}"
-                        loop.call_soon_threadsafe(self.show_error_popup, error_message)
+                        except Exception as e:
+                            error_message = f"An unexpected error occurred: {e}"
+                            loop.call_soon_threadsafe(self.show_error_popup, error_message)
+                        finally:
+                            stream.close()
                     if not self.is_streaming_cancelled:
                         self.app.after(0, self.add_empty_user_message)
                 loop = asyncio.new_event_loop()
@@ -514,15 +526,17 @@ class MainWindow:
             else:
                 # Existing streaming code for OpenAI models
                 async def streaming_chat_completion():
-                    try:
-                        async for chunk in await self.aclient.chat.completions.create(model=model_name,
+                    streaming_client = aclient if model_name in openai_models else custom_aclient
+                    response = streaming_client.chat.completions.create(model=model_name,
                         messages=messages,
                         temperature=self.temperature_var.get(),
                         max_tokens=self.max_length_var.get(),
                         top_p=1,
                         frequency_penalty=0,
                         presence_penalty=0,
-                        stream=True):
+                        stream=True)
+                    try:
+                        async for chunk in await response:
                             content = chunk.choices[0].delta.content
                             if content is not None:
                                 self.app.after(0, self.add_to_last_message, content)
@@ -537,6 +551,9 @@ class MainWindow:
                     except Exception as e:
                         error_message = f"An unexpected error occurred: {e}"
                         loop.call_soon_threadsafe(self.show_error_popup, error_message)
+                    finally:
+                        response.close()
+                        print("Closed response")
                     if not self.is_streaming_cancelled:
                         self.app.after(0, self.add_empty_user_message)
                 loop = asyncio.new_event_loop()
@@ -704,17 +721,18 @@ class MainWindow:
         self.chat_frame.configure(scrollregion=self.chat_frame.bbox("all"))
 
     def save_api_key(self):
+        global client, aclient, anthropic_client, custom_aclient
         if self.apikey_var.get() != "":
-            self.client = OpenAI(api_key=self.apikey_var.get(), organization=self.orgid_var.get())
-            self.aclient = AsyncOpenAI(api_key=self.apikey_var.get(), organization=self.orgid_var.get())
-            self.config.set("openai", "api_key", self.client.api_key)
-            self.config.set("openai", "organization", self.client.organization)
+            client = OpenAI(api_key=self.apikey_var.get(), organization=self.orgid_var.get())
+            aclient = AsyncOpenAI(api_key=self.apikey_var.get(), organization=self.orgid_var.get())
+            config.set("openai", "api_key", client.api_key)
+            config.set("openai", "organization", client.organization)
         if self.anthropic_apikey_var.get() != "":
-            self.anthropic_client = anthropic.Anthropic(api_key=self.anthropic_apikey_var.get())
-            self.config.set("anthropic", "api_key", self.anthropic_client.api_key)
+            anthropic_client = anthropic.Anthropic(api_key=self.anthropic_apikey_var.get())
+            config.set("anthropic", "api_key", anthropic_client.api_key)
 
         with open("config.ini", "w") as config_file:
-            self.config.write(config_file)
+            config.write(config_file)
 
     def add_message_via_button(self):
         self.add_message("user" if len(self.chat_history) == 0 or self.chat_history[-1]["role"].get() == "assistant" else "assistant", "")
@@ -752,20 +770,13 @@ class MainWindow:
         except ValueError:
             self.max_len_entry_var.set(self.max_length_var.get())
 
-    def add_app_section_to_config_if_not_present(self):
-        if not self.config.has_section("app"):
-            self.config.add_section("app")
-            self.config.set("app", "dark_mode", "False")
-            with open(self.config_filename, "w") as f:
-                self.config.write(f)
-
     def save_dark_mode_state(self):
-        self.config.set("app", "dark_mode", str(self.dark_mode_var.get()))
-        with open(self.config_filename, "w") as f:
-            self.config.write(f)
+        config.set("app", "dark_mode", str(self.dark_mode_var.get()))
+        with open(config_filename, "w") as f:
+            config.write(f)
 
     def load_dark_mode_state(self):
-        return self.config.getboolean("app", "dark_mode", fallback=False)
+        return config.getboolean("app", "dark_mode", fallback=False)
 
     def toggle_dark_mode(self):
         if self.dark_mode_var.get():
@@ -847,9 +858,9 @@ class MainWindow:
             json.dump(chat_data, f, indent=4)
 
         # Save the last used model
-        self.config.set("app", "last_used_model", self.model_var.get())
+        config.set("app", "last_used_model", self.model_var.get())
         with open("config.ini", "w") as config_file:
-            self.config.write(config_file)
+            config.write(config_file)
 
         # Close the application
         self.app.destroy()
