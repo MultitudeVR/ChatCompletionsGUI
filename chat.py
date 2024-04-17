@@ -136,6 +136,9 @@ class MainWindow:
 
         self.is_streaming_cancelled = False
 
+        self.popup = None
+        self.popup_frame = None
+
         # Create the main_frame for holding the chat and other widgets
         self.main_frame = ttk.Frame(self.app, padding="10")
         self.main_frame.grid(row=1, column=0, sticky="nsew")
@@ -290,9 +293,6 @@ class MainWindow:
 
         # Initialize the previous_focused_widget variable
         self.previous_focused_widget = None
-
-        self.popup = None
-        self.popup_frame = None
 
         # Bind events
         self.inner_frame.bind("<Configure>", self.configure_scrollregion)
