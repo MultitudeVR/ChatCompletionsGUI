@@ -104,7 +104,7 @@ aclient = AsyncOpenAI(api_key=config.get("openai", "api_key", fallback="insert-k
 anthropic_client = anthropic.Anthropic(api_key=config.get("anthropic", "api_key", fallback=""))
 custom_aclient = AsyncOpenAI(base_url = config.get("custom_server", "base_url", fallback=""), api_key=config.get("custom_server", "api_key", fallback="ollama"),)
 
-system_message_default_text = "You are a helpful assistant."
+system_message_default_text = ""
 vision_models = ['gpt-4-vision-preview', 'gpt-4-1106-vision-preview', 'gpt-4-turbo', 'gpt-4-turbo-2024-04-09']
 openai_models = [
     "gpt-3.5-turbo",
@@ -124,8 +124,8 @@ openai_models = [
     "gpt-3.5-turbo-1106",
     "gpt-3.5-turbo-16k-0613",
 ]
-custom_models = [model.strip() for model in config.get("custom_server", "models", fallback="").split(",")]
-custom_models = [model for model in custom_models if model]
+anthropic_models = ["claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307", "claude-2.1", "claude-2.0", "claude-instant-1.2"]
+custom_models = [model.strip() for model in config.get("custom_server", "models", fallback="").split(",") if model.strip()]
 
 class MainWindow:
     def __init__(self, root):
@@ -150,11 +150,7 @@ class MainWindow:
         last_used_model = config.get("app", "last_used_model", fallback="gpt-4-turbo")
         self.model_var = tk.StringVar(value=last_used_model)
         ttk.Label(self.main_frame, text="Model:").grid(row=0, column=6, sticky="ne")
-        # openai_models = [model.id for model in client.models.list() if ('gpt' in model.id and 'instruct' not in model.id)]
-        # openai_models.sort()
-        possible_models = [*openai_models, "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307", "claude-2.1", "claude-2.0", "claude-instant-1.2", *custom_models]
-        filtered_models = [model for model in possible_models if model != last_used_model]
-        ttk.OptionMenu(self.main_frame, self.model_var, last_used_model, last_used_model, *filtered_models).grid(row=0, column=7, sticky="nw")
+        self.update_models_dropdown()
 
         # Add sliders for temperature, max length, and top p
         self.temperature_var = tk.DoubleVar(value=0.7)
@@ -239,13 +235,20 @@ class MainWindow:
         self.save_button = ttk.Button(self.configuration_frame, text="Save Chat", command=self.save_chat_history)
         self.save_button.grid(row=config_row, column=3, sticky="w")
 
+        # Add api configuration variables
         self.apikey_var = tk.StringVar(value=client.api_key)
         self.orgid_var = tk.StringVar(value=client.organization)
         self.anthropic_apikey_var = tk.StringVar(value=anthropic_client.api_key)
+        self.custom_baseurl_var = tk.StringVar(value=custom_aclient.base_url)
+        self.custom_apikey_var = tk.StringVar(value=custom_aclient.api_key)
+        self.custom_models_var = tk.StringVar(value=", ".join(custom_models))
 
         self.apikey_var.trace("w", self.on_config_changed)
         self.orgid_var.trace("w", self.on_config_changed)
         self.anthropic_apikey_var.trace("w", self.on_config_changed)
+        self.custom_baseurl_var.trace("w", self.on_config_changed)
+        self.custom_apikey_var.trace("w", self.on_config_changed)
+        self.custom_models_var.trace("w", self.on_config_changed)
 
         # Add image detail dropdown
         self.image_detail_var = tk.StringVar(value="low")
@@ -460,7 +463,7 @@ class MainWindow:
         # get messages
         messages = self.get_messages_from_chat_history()
         # check if too many tokens
-        model_max_context_window = (16384 if ('16k' in self.model_var.get() or 'gpt-3.5-turbo-0125' in self.model_var.get()) else 128000 if (self.model_var.get() in ['gpt-4-1106-preview','gpt-4-0125-preview', 'gpt-4-turbo'] or 'claude' in self.model_var.get()) else 8192 if self.model_var.get().startswith('gpt-4') else 4096)
+        model_max_context_window = (16384 if ('16k' in self.model_var.get() or 'gpt-3.5-turbo-0125' in self.model_var.get()) else 128000 if (self.model_var.get() in ['gpt-4-1106-preview','gpt-4-0125-preview', 'gpt-4-turbo'] or 'claude' in self.model_var.get()) else 8192 if self.model_var.get().startswith('gpt-4') else 128000)
         num_prompt_tokens = self.count_tokens(messages, self.model_var.get())
         num_completion_tokens = int(self.max_length_var.get())
         if num_prompt_tokens + num_completion_tokens > model_max_context_window:
@@ -527,33 +530,39 @@ class MainWindow:
                 # Existing streaming code for OpenAI models
                 async def streaming_chat_completion():
                     streaming_client = aclient if model_name in openai_models else custom_aclient
-                    response = streaming_client.chat.completions.create(model=model_name,
-                        messages=messages,
-                        temperature=self.temperature_var.get(),
-                        max_tokens=self.max_length_var.get(),
-                        top_p=1,
-                        frequency_penalty=0,
-                        presence_penalty=0,
-                        stream=True)
                     try:
-                        async for chunk in await response:
-                            content = chunk.choices[0].delta.content
-                            if content is not None:
-                                self.app.after(0, self.add_to_last_message, content)
-                            if self.is_streaming_cancelled:
-                                break
-                    except openai.AuthenticationError as e:
-                        if "Incorrect API key" in str(e):
-                            error_message = "API key is incorrect, please configure it in the settings."
-                        elif "No such organization" in str(e):
-                            error_message = "Organization not found, please configure it in the settings."
-                        loop.call_soon_threadsafe(self.show_error_and_open_settings, error_message)
+                        response = streaming_client.chat.completions.create(model=model_name,
+                            messages=messages,
+                            temperature=self.temperature_var.get(),
+                            max_tokens=self.max_length_var.get(),
+                            # top_p=1,
+                            # frequency_penalty=0,
+                            # presence_penalty=0,
+                            stream=True)
                     except Exception as e:
-                        error_message = f"An unexpected error occurred: {e}"
+                        error_message = f"An error occurred: {e}"
                         loop.call_soon_threadsafe(self.show_error_popup, error_message)
-                    finally:
-                        response.close()
-                        print("Closed response")
+                    
+                    if response:
+                        try:
+                            async for chunk in await response:
+                                content = chunk.choices[0].delta.content
+                                if content is not None:
+                                    self.app.after(0, self.add_to_last_message, content)
+                                if self.is_streaming_cancelled:
+                                    break
+                        except openai.AuthenticationError as e:
+                            if "Incorrect API key" in str(e):
+                                error_message = "API key is incorrect, please configure it in the settings."
+                            elif "No such organization" in str(e):
+                                error_message = "Organization not found, please configure it in the settings."
+                            loop.call_soon_threadsafe(self.show_error_and_open_settings, error_message)
+                        except Exception as e:
+                            error_message = f"An unexpected error occurred: {e}"
+                            loop.call_soon_threadsafe(self.show_error_popup, error_message)
+                        finally:
+                            response.close()
+                            print("Closed response")
                     if not self.is_streaming_cancelled:
                         self.app.after(0, self.add_empty_user_message)
                 loop = asyncio.new_event_loop()
@@ -585,6 +594,12 @@ class MainWindow:
         menu.add_command(label="<new-log>", command=lambda value="<new-log>": self.chat_filename_var.set(value))
         for file in self.chat_files:
             menu.add_command(label=file, command=lambda value=file: self.chat_filename_var.set(value))
+
+    def update_models_dropdown(self):
+        current_model = self.model_var.get()
+        possible_models = [*openai_models, *anthropic_models, *custom_models]
+        filtered_models = [model for model in possible_models if model != current_model]
+        self.models_dropdown = ttk.OptionMenu(self.main_frame, self.model_var, current_model, current_model, *filtered_models).grid(row=0, column=7, sticky="nw")
 
     def load_chat_history(self):
         filename = self.chat_filename_var.get()
@@ -730,6 +745,15 @@ class MainWindow:
         if self.anthropic_apikey_var.get() != "":
             anthropic_client = anthropic.Anthropic(api_key=self.anthropic_apikey_var.get())
             config.set("anthropic", "api_key", anthropic_client.api_key)
+        if self.custom_baseurl_var.get() != "":
+            custom_aclient = OpenAI(api_key=self.custom_apikey_var.get(), base_url=self.custom_baseurl_var.get())
+            config.set("custom_server", "base_url", str(custom_aclient.base_url))
+            config.set("custom_server", "api_key", custom_aclient.api_key)
+        if self.custom_models_var.get() != "":
+            custom_models.clear()
+            custom_models.extend([model.strip() for model in self.custom_models_var.get().split(",") if model.strip()])
+            config.set("custom_server", "models", self.custom_models_var.get())
+            self.update_models_dropdown()
 
         with open("config.ini", "w") as config_file:
             config.write(config_file)
@@ -919,10 +943,24 @@ class MainWindow:
         anthropic_apikey_entry = ttk.Entry(self.popup_frame, textvariable=self.anthropic_apikey_var, width=60)
         anthropic_apikey_entry.grid(row=2, column=1, sticky="e")
 
+        # Add Custom Server configuration
+        ttk.Separator(self.popup_frame, orient='horizontal').grid(row=3, column=0, columnspan=2, sticky="we", pady=10)
+        ttk.Label(self.popup_frame, text="Custom Server Configuration").grid(row=4, column=0, sticky="e")
+        ttk.Label(self.popup_frame, text="Base URL:").grid(row=5, column=0, sticky="e")
+        custom_baseurl_entry = ttk.Entry(self.popup_frame, textvariable=self.custom_baseurl_var, width=60)
+        custom_baseurl_entry.grid(row=5, column=1, sticky="e")
+        ttk.Label(self.popup_frame, text="API Key:").grid(row=6, column=0, sticky="e")
+        custom_apikey_entry = ttk.Entry(self.popup_frame, textvariable=self.custom_apikey_var, width=60)
+        custom_apikey_entry.grid(row=6, column=1, sticky="e")
+        ttk.Label(self.popup_frame, text="Models (comma-separated):").grid(row=7, column=0, sticky="e")
+        custom_models_entry = ttk.Entry(self.popup_frame, textvariable=self.custom_models_var, width=60)
+        custom_models_entry.grid(row=7, column=1, sticky="e")
+
         # Create a Checkbutton widget for dark mode toggle
+        ttk.Separator(self.popup_frame, orient='horizontal').grid(row=8, column=0, columnspan=2, sticky="we", pady=10)
         self.dark_mode_var.set(self.load_dark_mode_state())
         dark_mode_checkbutton = ttk.Checkbutton(self.popup_frame, text="Dark mode", variable=self.dark_mode_var, command=self.toggle_dark_mode)
-        dark_mode_checkbutton.grid(row=3, column=0, columnspan=2, padx=10, pady=10, sticky="w")
+        dark_mode_checkbutton.grid(row=9, column=0, columnspan=2, padx=10, pady=10, sticky="w")
         # Add a button to close the popup
         close_button = ttk.Button(self.popup_frame, text="Close", command=self.close_popup)
         close_button.grid(row=100, column=0, columnspan=2, pady=10)
