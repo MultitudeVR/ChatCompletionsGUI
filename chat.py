@@ -459,18 +459,32 @@ class MainWindow:
         except requests.RequestException as e:
             return False
 
-    def send_request(self):
-        # get messages
-        messages = self.get_messages_from_chat_history()
-        # check if too many tokens
-        model_max_context_window = (16384 if ('16k' in self.model_var.get() or 'gpt-3.5-turbo-0125' in self.model_var.get()) else 128000 if (self.model_var.get() in ['gpt-4-1106-preview','gpt-4-0125-preview', 'gpt-4-turbo'] or 'claude' in self.model_var.get()) else 8192 if self.model_var.get().startswith('gpt-4') else 128000)
+    def get_model_max_context_window(self, model):
+        if '16k' in model or 'gpt-3.5-turbo-0125' in model:
+            return 16384
+        elif model in ['gpt-4-1106-preview', 'gpt-4-0125-preview', 'gpt-4-turbo'] or 'claude' in model:
+            return 128000
+        elif model.startswith('gpt-4'):
+            return 8192
+        else:
+            return 128000
+
+    def check_token_limits(self, messages):
+        model_max_context_window = self.get_model_max_context_window(self.model_var.get())
         num_prompt_tokens = self.count_tokens(messages, self.model_var.get())
         num_completion_tokens = int(self.max_length_var.get())
+
         if num_prompt_tokens + num_completion_tokens > model_max_context_window:
-            self.show_error_popup(f"combined prompt and completion tokens ({num_prompt_tokens} + {num_completion_tokens} = {num_prompt_tokens+num_completion_tokens}) exceeds this model's maximum context window of {model_max_context_window}.")
-            return
-        # convert messages to image api format, if necessary
-        if self.model_var.get() in vision_models:
+            error_msg = (f"combined prompt and completion tokens ({num_prompt_tokens} + {num_completion_tokens} = "
+                        f"{num_prompt_tokens + num_completion_tokens}) exceeds this model's maximum context window of "
+                        f"{model_max_context_window}.")
+            self.show_error_popup(error_msg)
+            return False
+        return True
+    
+    # convert messages to format the given model expects
+    def convert_messages_for_model(self, model, messages):
+        if model in vision_models:
             # Update the messages to include image data if any image URLs are found in the user's input
             new_messages = []
             for message in messages:
@@ -481,93 +495,104 @@ class MainWindow:
                 else:
                     # System or assistant messages are added unchanged
                     new_messages.append(message)
-            messages = new_messages
+            return new_messages, None
+        elif model in anthropic_models:
+            # Anthropic API has a bunch of extra requirements not present in OpenAI's API
+            anthropic_messages = []
+            system_content = ""
+            for message in messages:
+                if message["role"] == "system":
+                    system_content += message["content"] + "\n"
+                elif message["content"]:
+                    anthropic_messages.append({"role": message["role"], "content": message["content"]})
+            if len(anthropic_messages) == 0 or anthropic_messages[0]["role"] == "assistant":
+                anthropic_messages.insert(0, {"role": "user", "content": "<no message>"})
+            for i in range(len(anthropic_messages) - 1, 0, -1):
+                if anthropic_messages[i]["role"] == anthropic_messages[i - 1]["role"]:
+                    anthropic_messages.insert(i, {"role": "user" if anthropic_messages[i]["role"] == "assistant" else "assistant", "content": "<no message>"})
+            if anthropic_messages[-1]["role"] == "assistant":
+                anthropic_messages.append({"role": "user", "content": "<no message>"})
+            return anthropic_messages, system_content
+        return messages, None
+
+    def stream_openai_model_output(self, messages):
+        async def streaming_chat_completion():
+            streaming_client = aclient if self.model_var.get() in openai_models else custom_aclient
+            try:
+                response = streaming_client.chat.completions.create(model=self.model_var.get(),
+                    messages=messages,
+                    temperature=self.temperature_var.get(),
+                    max_tokens=self.max_length_var.get(),
+                    # top_p=1,
+                    # frequency_penalty=0,
+                    # presence_penalty=0,
+                    stream=True)
+            except Exception as e:
+                error_message = f"An error occurred: {e}"
+                loop.call_soon_threadsafe(self.show_error_popup, error_message)
+                return
+            try:
+                async for chunk in await response:
+                    content = chunk.choices[0].delta.content
+                    if content is not None:
+                        self.app.after(0, self.add_to_last_message, content)
+                    if self.is_streaming_cancelled:
+                        break
+            except openai.AuthenticationError as e:
+                if "Incorrect API key" in str(e):
+                    error_message = "API key is incorrect, please configure it in the settings."
+                elif "No such organization" in str(e):
+                    error_message = "Organization not found, please configure it in the settings."
+                loop.call_soon_threadsafe(self.show_error_and_open_settings, error_message)
+            except Exception as e:
+                error_message = f"An unexpected error occurred: {e}"
+                loop.call_soon_threadsafe(self.show_error_popup, error_message)
+            finally:
+                response.close()
+                print("Closed response")
+            if not self.is_streaming_cancelled:
+                self.app.after(0, self.add_empty_user_message)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(streaming_chat_completion())
+
+    def stream_anthropic_model_output(self, messages, system_message):
+        async def streaming_anthropic_chat_completion():
+            with anthropic_client.messages.stream(
+                    model=self.model_var.get(),
+                    max_tokens=min(self.max_length_var.get(), 4000),
+                    messages=messages,
+                    system=system_message.strip(),
+                    temperature=self.temperature_var.get()
+                ) as stream:
+                try:
+                    for text in stream.text_stream:
+                        self.app.after(0, self.add_to_last_message, text)
+                        if self.is_streaming_cancelled:
+                            break
+                except Exception as e:
+                    error_message = f"An unexpected error occurred: {e}"
+                    loop.call_soon_threadsafe(self.show_error_popup, error_message)
+                finally:
+                    stream.close()
+            if not self.is_streaming_cancelled:
+                self.app.after(0, self.add_empty_user_message)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(streaming_anthropic_chat_completion())
+
+    def send_request(self):
+        messages = self.get_messages_from_chat_history()
+        if not self.check_token_limits(messages):
+            return
+        messages, anthropic_system_message = self.convert_messages_for_model(self.model_var.get(), messages)
         # send request
         def request_thread():
             model_name = self.model_var.get()
-            if model_name.startswith("claude"):
-                # Streaming for Anthropic's Claude model
-                # Create a copy of messages for Anthropic API
-                # It has a bunch of extra requirements not present in OpenAI's API
-                anthropic_messages = []
-                system_content = ""
-                for message in messages:
-                    if message["role"] == "system":
-                        system_content += message["content"] + "\n"
-                    elif message["content"]:
-                        anthropic_messages.append({"role": message["role"], "content": message["content"]})
-                if len(anthropic_messages) == 0 or anthropic_messages[0]["role"] == "assistant":
-                    anthropic_messages.insert(0, {"role": "user", "content": "<no message>"})
-                for i in range(len(anthropic_messages) - 1, 0, -1):
-                    if anthropic_messages[i]["role"] == anthropic_messages[i - 1]["role"]:
-                        anthropic_messages.insert(i, {"role": "user" if anthropic_messages[i]["role"] == "assistant" else "assistant", "content": "<no message>"})
-                if anthropic_messages[-1]["role"] == "assistant":
-                    anthropic_messages.append({"role": "user", "content": "<no message>"})
-                async def streaming_anthropic_chat_completion():
-                    with anthropic_client.messages.stream(
-                            model=model_name,
-                            max_tokens=min(self.max_length_var.get(), 4000),
-                            messages=anthropic_messages,
-                            system=system_content.strip(),
-                            temperature=self.temperature_var.get()
-                        ) as stream:
-                        try:
-                            for text in stream.text_stream:
-                                self.app.after(0, self.add_to_last_message, text)
-                                if self.is_streaming_cancelled:
-                                    break
-                        except Exception as e:
-                            error_message = f"An unexpected error occurred: {e}"
-                            loop.call_soon_threadsafe(self.show_error_popup, error_message)
-                        finally:
-                            stream.close()
-                    if not self.is_streaming_cancelled:
-                        self.app.after(0, self.add_empty_user_message)
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(streaming_anthropic_chat_completion())
+            if model_name in anthropic_models:
+                self.stream_anthropic_model_output(messages, anthropic_system_message)
             else:
-                # Existing streaming code for OpenAI models
-                async def streaming_chat_completion():
-                    streaming_client = aclient if model_name in openai_models else custom_aclient
-                    try:
-                        response = streaming_client.chat.completions.create(model=model_name,
-                            messages=messages,
-                            temperature=self.temperature_var.get(),
-                            max_tokens=self.max_length_var.get(),
-                            # top_p=1,
-                            # frequency_penalty=0,
-                            # presence_penalty=0,
-                            stream=True)
-                    except Exception as e:
-                        error_message = f"An error occurred: {e}"
-                        loop.call_soon_threadsafe(self.show_error_popup, error_message)
-                    
-                    if response:
-                        try:
-                            async for chunk in await response:
-                                content = chunk.choices[0].delta.content
-                                if content is not None:
-                                    self.app.after(0, self.add_to_last_message, content)
-                                if self.is_streaming_cancelled:
-                                    break
-                        except openai.AuthenticationError as e:
-                            if "Incorrect API key" in str(e):
-                                error_message = "API key is incorrect, please configure it in the settings."
-                            elif "No such organization" in str(e):
-                                error_message = "Organization not found, please configure it in the settings."
-                            loop.call_soon_threadsafe(self.show_error_and_open_settings, error_message)
-                        except Exception as e:
-                            error_message = f"An unexpected error occurred: {e}"
-                            loop.call_soon_threadsafe(self.show_error_popup, error_message)
-                        finally:
-                            response.close()
-                            print("Closed response")
-                    if not self.is_streaming_cancelled:
-                        self.app.after(0, self.add_empty_user_message)
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(streaming_chat_completion())
+                self.stream_openai_model_output(messages)
         self.is_streaming_cancelled = False
         self.set_submit_button(False)
         Thread(target=request_thread).start()
@@ -648,6 +673,7 @@ class MainWindow:
         self.add_message("user", "")
         self.set_submit_button(True)
 
+    # Hack. Not sure why the message entries don't just scale to fit the canvas automatically
     def update_entry_widths(self, event=None):
         window_width = self.app.winfo_width()
         screen_width = self.app.winfo_screenwidth()
