@@ -1,6 +1,6 @@
 
-system_message_default_text = ""
-openai_models = [
+SYSTEM_MESSAGE_DEFAULT_TEXT = ""
+OPENAI_MODELS = [
     "gpt-3.5-turbo",
     "gpt-4-turbo",
     "gpt-4",
@@ -17,7 +17,7 @@ openai_models = [
     "gpt-3.5-turbo-1106",
     "gpt-3.5-turbo-16k-0613",
 ]
-anthropic_models = [
+ANTHROPIC_MODELS = [
     "claude-3-opus-20240229", 
     "claude-3-sonnet-20240229", 
     "claude-3-haiku-20240307", 
@@ -25,13 +25,13 @@ anthropic_models = [
     "claude-2.0", 
     "claude-instant-1.2"
 ]
-openai_vision_models = [
+OPENAI_VISION_MODELS = [
     'gpt-4-vision-preview', 
     'gpt-4-1106-vision-preview', 
     'gpt-4-turbo', 
     'gpt-4-turbo-2024-04-09',
 ]
-model_info = {
+MODEL_INFO = {
     "gpt-4-turbo": {"max_tokens": 128000, "input_price": 0.01, "output_price": 0.03},
     "gpt-4-turbo-2024-04-09": {"max_tokens": 128000, "input_price": 0.01, "output_price": 0.03},
     "gpt-4-0125-preview": {"max_tokens": 128000, "input_price": 0.01, "output_price": 0.03},
@@ -59,6 +59,6 @@ model_info = {
 }
 # Estimation for high detail image cost based on a 1024x1024 image
 # todo: get the actual image sizes for a more accurate estimation
-high_detail_cost_per_image = (170 * 4 + 85) / 1000 * 0.01  # 4 tiles for 1024x1024 + base tokens
+HIGH_DETAIL_COST_PER_IMAGE = (170 * 4 + 85) / 1000 * 0.01  # 4 tiles for 1024x1024 + base tokens
 # low detail images have a fixed cost
-low_detail_cost_per_image = 0.00085
+LOW_DETAIL_COST_PER_IMAGE = 0.00085

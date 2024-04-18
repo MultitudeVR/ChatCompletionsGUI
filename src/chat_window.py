@@ -17,7 +17,7 @@ import random
 import string
 import sys
 from tooltip import ToolTip
-from constants import openai_vision_models, openai_models, anthropic_models, system_message_default_text, model_info, high_detail_cost_per_image, low_detail_cost_per_image
+from constants import OPENAI_VISION_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, SYSTEM_MESSAGE_DEFAULT_TEXT, MODEL_INFO, HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE
 from prompts import file_naming_prompt
 from utils import convert_messages_for_model, parse_and_create_image_messages, count_tokens
 
@@ -46,7 +46,7 @@ class ChatWindow:
         self.main_frame.grid(row=1, column=0, sticky="nsew")
 
         # System message and model selection
-        system_message = tk.StringVar(value=system_message_default_text)
+        system_message = tk.StringVar(value=SYSTEM_MESSAGE_DEFAULT_TEXT)
         ttk.Label(self.main_frame, text="System message:").grid(row=0, column=0, sticky="w")
         self.system_message_widget = tk.Text(self.main_frame, wrap=tk.WORD, height=5, width=50, undo=True)
         self.system_message_widget.grid(row=0, column=1, sticky="we", pady=3)
@@ -310,7 +310,7 @@ class ChatWindow:
 
     def check_token_limits(self, messages):
         model = self.model_var.get()
-        model_max_context_window = model_info[model]["max_tokens"] if model in model_info else 128000
+        model_max_context_window = MODEL_INFO[model]["max_tokens"] if model in MODEL_INFO else 128000
         num_prompt_tokens = count_tokens(messages, model)
         num_completion_tokens = int(self.max_length_var.get())
 
@@ -324,7 +324,7 @@ class ChatWindow:
 
     def stream_openai_model_output(self, messages):
         async def streaming_chat_completion():
-            streaming_client = self.aclient if self.model_var.get() in openai_models else self.custom_aclient
+            streaming_client = self.aclient if self.model_var.get() in OPENAI_MODELS else self.custom_aclient
             try:
                 response = streaming_client.chat.completions.create(model=self.model_var.get(),
                     messages=messages,
@@ -396,7 +396,7 @@ class ChatWindow:
         # send request
         def request_thread():
             model_name = self.model_var.get()
-            if model_name in anthropic_models:
+            if model_name in ANTHROPIC_MODELS:
                 self.stream_anthropic_model_output(messages, anthropic_system_message)
             else:
                 self.stream_openai_model_output(messages)
@@ -429,7 +429,7 @@ class ChatWindow:
 
     def update_models_dropdown(self):
         current_model = self.model_var.get()
-        possible_models = [*openai_models, *anthropic_models, *self.custom_models]
+        possible_models = [*OPENAI_MODELS, *ANTHROPIC_MODELS, *self.custom_models]
         filtered_models = [model for model in possible_models if model != current_model]
         self.models_dropdown = ttk.OptionMenu(self.main_frame, self.model_var, current_model, current_model, *filtered_models).grid(row=0, column=7, sticky="nw")
 
@@ -439,7 +439,7 @@ class ChatWindow:
         if not filename or filename == "<new-log>":
             self.clear_chat_history()
             self.system_message_widget.delete("1.0", tk.END)
-            self.system_message_widget.insert(tk.END, system_message_default_text)
+            self.system_message_widget.insert(tk.END, SYSTEM_MESSAGE_DEFAULT_TEXT)
             self.add_message("user", "")
             return
 
@@ -820,7 +820,7 @@ class ChatWindow:
             self.submit_button.configure(command=self.cancel_streaming)
 
     def update_image_detail_visibility(self, *args):
-        if self.model_var.get() in openai_vision_models:
+        if self.model_var.get() in OPENAI_VISION_MODELS:
             self.image_detail_dropdown.grid(row=0, column=8, sticky="ne")
         else:
             self.image_detail_dropdown.grid_remove()
@@ -833,12 +833,12 @@ class ChatWindow:
         model = self.model_var.get()
 
         # Calculate input and output costs for non-vision models
-        input_cost = model_info[model]["input_price"] * num_input_tokens / 1000 if model in model_info else 0
-        output_cost = model_info[model]["output_price"] * num_output_tokens / 1000 if model in model_info else 0
+        input_cost = MODEL_INFO[model]["input_price"] * num_input_tokens / 1000 if model in MODEL_INFO else 0
+        output_cost = MODEL_INFO[model]["output_price"] * num_output_tokens / 1000 if model in MODEL_INFO else 0
         total_cost = input_cost + output_cost
         cost_message = f"Input Cost: ${input_cost:.5f}\nOutput Cost: ${output_cost:.5f}"
 
-        if model in openai_vision_models:
+        if model in OPENAI_VISION_MODELS:
             # Count the number of images in the messages
             num_images = 0
             parsed_messages = [parse_and_create_image_messages(message.get("content",""), self.image_detail_var.get()) for message in messages]
@@ -850,10 +850,10 @@ class ChatWindow:
             # Calculate vision cost if the model is vision preview
             vision_cost = 0
             if self.image_detail_var.get() == "low":
-                vision_cost = low_detail_cost_per_image * num_images
+                vision_cost = LOW_DETAIL_COST_PER_IMAGE * num_images
             else:
                 # Estimated cost for high detail images
-                vision_cost = high_detail_cost_per_image * num_images
+                vision_cost = HIGH_DETAIL_COST_PER_IMAGE * num_images
             total_cost = vision_cost
             cost_message += f"\nVision Cost: ${total_cost:.5f} for {num_images} images"
 
