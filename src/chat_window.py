@@ -833,8 +833,8 @@ class ChatWindow:
         model = self.model_var.get()
 
         # Calculate input and output costs for non-vision models
-        input_cost = model_info[model]["input_pricing"] * num_input_tokens / 1000 if model in model_info else 0
-        output_cost = model_info[model]["output_pricing"] * num_output_tokens / 1000 if model in model_info else 0
+        input_cost = model_info[model]["input_price"] * num_input_tokens / 1000 if model in model_info else 0
+        output_cost = model_info[model]["output_price"] * num_output_tokens / 1000 if model in model_info else 0
         total_cost = input_cost + output_cost
         cost_message = f"Input Cost: ${input_cost:.5f}\nOutput Cost: ${output_cost:.5f}"
 
