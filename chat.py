@@ -762,7 +762,7 @@ class MainWindow:
         self.chat_frame.configure(scrollregion=self.chat_frame.bbox("all"))
 
     def save_api_key(self):
-        global client, aclient, anthropic_client, custom_aclient
+        global client, aclient, anthropic_client, custom_aclient, custom_models
         if self.apikey_var.get() != "":
             client = OpenAI(api_key=self.apikey_var.get(), organization=self.orgid_var.get())
             aclient = AsyncOpenAI(api_key=self.apikey_var.get(), organization=self.orgid_var.get())
@@ -772,7 +772,7 @@ class MainWindow:
             anthropic_client = anthropic.Anthropic(api_key=self.anthropic_apikey_var.get())
             config.set("anthropic", "api_key", anthropic_client.api_key)
         if self.custom_baseurl_var.get() != "":
-            custom_aclient = OpenAI(api_key=self.custom_apikey_var.get(), base_url=self.custom_baseurl_var.get())
+            custom_aclient = AsyncOpenAI(base_url = config.get("custom_server", "base_url", fallback=""), api_key=config.get("custom_server", "api_key", fallback="ollama"),)
             config.set("custom_server", "base_url", str(custom_aclient.base_url))
             config.set("custom_server", "api_key", custom_aclient.api_key)
         if self.custom_models_var.get() != "":
