@@ -863,4 +863,4 @@ class ChatWindow:
         # Handle key press event
         if event.state == 0x0004 and event.keysym == 'n':  # 0x0004 is the mask for the Control key on Windows/Linux
             new_root = tk.Toplevel(self.app)
-            new_window = ChatWindow(new_root)
+            new_window = ChatWindow(new_root, self.config, self.os_name)
