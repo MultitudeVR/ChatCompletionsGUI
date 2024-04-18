@@ -16,7 +16,7 @@ import string
 import anthropic
 import sys
 from tooltip import ToolTip
-from constants import vision_models, openai_models, anthropic_models, system_message_default_text, pricing_info, high_detail_cost_per_image, low_detail_cost_per_image
+from constants import openai_vision_models, openai_models, anthropic_models, system_message_default_text, model_info, high_detail_cost_per_image, low_detail_cost_per_image
 from prompts import file_naming_prompt
 from utils import convert_messages_for_model, parse_and_create_image_messages, count_tokens
 
@@ -252,7 +252,6 @@ class MainWindow:
 
         self.chat_history.clear()
 
-
     def save_chat_history(self):
         filename = self.chat_filename_var.get()
         chat_data = {
@@ -345,19 +344,10 @@ class MainWindow:
             self.show_popup()
         self.show_error_popup(message)
 
-    def get_model_max_context_window(self, model):
-        if '16k' in model or 'gpt-3.5-turbo-0125' in model:
-            return 16384
-        elif model in ['gpt-4-1106-preview', 'gpt-4-0125-preview', 'gpt-4-turbo'] or 'claude' in model:
-            return 128000
-        elif model.startswith('gpt-4'):
-            return 8192
-        else:
-            return 128000
-
     def check_token_limits(self, messages):
-        model_max_context_window = self.get_model_max_context_window(self.model_var.get())
-        num_prompt_tokens = count_tokens(messages, self.model_var.get())
+        model = self.model_var.get()
+        model_max_context_window = model_info[model]["max_tokens"] if model in model_info else 128000
+        num_prompt_tokens = count_tokens(messages, model)
         num_completion_tokens = int(self.max_length_var.get())
 
         if num_prompt_tokens + num_completion_tokens > model_max_context_window:
@@ -867,7 +857,7 @@ class MainWindow:
             self.submit_button.configure(command=self.cancel_streaming)
 
     def update_image_detail_visibility(self, *args):
-        if self.model_var.get() in vision_models:
+        if self.model_var.get() in openai_vision_models:
             self.image_detail_dropdown.grid(row=0, column=8, sticky="ne")
         else:
             self.image_detail_dropdown.grid_remove()
@@ -880,12 +870,12 @@ class MainWindow:
         model = self.model_var.get()
 
         # Calculate input and output costs for non-vision models
-        input_cost = pricing_info[model]["input"] * num_input_tokens / 1000 if model in pricing_info else 0
-        output_cost = pricing_info[model]["output"] * num_output_tokens / 1000 if model in pricing_info else 0
+        input_cost = model_info[model]["input_pricing"] * num_input_tokens / 1000 if model in model_info else 0
+        output_cost = model_info[model]["output_pricing"] * num_output_tokens / 1000 if model in model_info else 0
         total_cost = input_cost + output_cost
         cost_message = f"Input Cost: ${input_cost:.5f}\nOutput Cost: ${output_cost:.5f}"
 
-        if model in vision_models:
+        if model in openai_vision_models:
             # Count the number of images in the messages
             num_images = 0
             parsed_messages = [parse_and_create_image_messages(message.get("content",""), self.image_detail_var.get()) for message in messages]

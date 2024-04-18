@@ -1,4 +1,4 @@
-from constants import vision_models, anthropic_models
+from constants import openai_vision_models, anthropic_models
 import re
 import requests
 import tiktoken
@@ -56,7 +56,7 @@ def parse_and_create_image_messages(content, image_detail):
     return {"role": "user", "content": messages}
 
 def convert_messages_for_model(model, messages, image_detail="low"):
-    if model in vision_models:
+    if model in openai_vision_models:
         # Update the messages to include image data if any image URLs are found in the user's input
         new_messages = []
         for message in messages:
