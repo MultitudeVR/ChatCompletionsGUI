@@ -1,2 +1,0 @@
-pyinstaller chat.spec
-pause

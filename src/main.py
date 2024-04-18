@@ -1,75 +1,24 @@
 import openai
 from openai import OpenAI, AsyncOpenAI
-
 import tkinter as tk
 from tkinter import ttk
 from tkinter import filedialog
 from tkinter import messagebox
 from threading import Thread
 import configparser
-import re
 import os
 import platform
 import asyncio
-import tiktoken
 import json
 from datetime import datetime
 import random
 import string
-import urllib.parse
 import anthropic
-import requests
 import sys
-
-class ToolTip:
-    def __init__(self, widget, text):
-        self.widget = widget
-        self.text = text
-        self.tooltip_window = None
-        self.tooltip_id = None  # ID of the scheduled tooltip
-        self.delay = 650  # Delay in milliseconds (0.65 seconds)
-        self.widget.bind("<Enter>", self.schedule_tooltip)
-        self.widget.bind("<Leave>", self.hide_tooltip)
-
-    def schedule_tooltip(self, event=None):
-        # Cancel any existing scheduled tooltip
-        if self.tooltip_id:
-            self.widget.after_cancel(self.tooltip_id)
-        # Schedule the tooltip to be shown after the delay
-        self.tooltip_id = self.widget.after(self.delay, self.show_tooltip)
-
-    def show_tooltip(self):
-        x, y, _, _ = self.widget.bbox("insert")
-        x += self.widget.winfo_rootx() + 25
-        y += self.widget.winfo_rooty() + 25
-        self.tooltip_window = tk.Toplevel(self.widget)
-        self.tooltip_window.wm_overrideredirect(True)
-        self.tooltip_window.wm_geometry(f"+{x}+{y}")
-        label = tk.Label(self.tooltip_window, text=self.text, background="black", foreground="white", relief="solid", borderwidth=1)
-        label.pack()
-
-    def hide_tooltip(self, event=None):
-        # Cancel any scheduled tooltip
-        if self.tooltip_id:
-            self.widget.after_cancel(self.tooltip_id)
-            self.tooltip_id = None
-        # Destroy the tooltip window if it exists
-        if self.tooltip_window:
-            self.tooltip_window.destroy()
-            self.tooltip_window = None
-
-os_name = platform.system()
-if os_name == 'Linux' and "ANDROID_BOOTLOGO" in os.environ:
-	os_name = 'Android'
-
-if not os.path.exists("chat_logs"):
-    os.makedirs("chat_logs")
-
-
-# Hide console window on Windows
-if os.name == 'nt':
-    import ctypes
-    ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
+from tooltip import ToolTip
+from constants import vision_models, openai_models, anthropic_models, system_message_default_text, pricing_info, high_detail_cost_per_image, low_detail_cost_per_image
+from prompts import file_naming_prompt
+from utils import convert_messages_for_model, parse_and_create_image_messages, count_tokens
 
 # configure config file
 config_filename = "config.ini"
@@ -99,32 +48,21 @@ if not config.has_section("app"):
     with open(config_filename, "w") as f:
         config.write(f)
 
+os_name = platform.system()
+if os_name == 'Linux' and "ANDROID_BOOTLOGO" in os.environ:
+	os_name = 'Android'
+if not os.path.exists("chat_logs"):
+    os.makedirs("chat_logs")
+# Hide console window on Windows
+if os.name == 'nt':
+    import ctypes
+    ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
+
 client = OpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
 aclient = AsyncOpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
 anthropic_client = anthropic.Anthropic(api_key=config.get("anthropic", "api_key", fallback=""))
 custom_aclient = AsyncOpenAI(base_url = config.get("custom_server", "base_url", fallback=""), api_key=config.get("custom_server", "api_key", fallback="ollama"),)
 
-system_message_default_text = ""
-vision_models = ['gpt-4-vision-preview', 'gpt-4-1106-vision-preview', 'gpt-4-turbo', 'gpt-4-turbo-2024-04-09']
-openai_models = [
-    "gpt-3.5-turbo",
-    "gpt-4-turbo",
-    "gpt-4",
-    "gpt-4-32k",
-    "gpt-4-turbo-preview",
-    "gpt-4-vision-preview",
-    "gpt-4-0125-preview",
-    "gpt-4-0613",
-    "gpt-4-1106-preview",
-    "gpt-4-1106-vision-preview",
-    "gpt-3.5-turbo-16k",
-    "gpt-3.5-turbo-0125",
-    "gpt-3.5-turbo-0301",
-    "gpt-3.5-turbo-0613",
-    "gpt-3.5-turbo-1106",
-    "gpt-3.5-turbo-16k-0613",
-]
-anthropic_models = ["claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307", "claude-2.1", "claude-2.0", "claude-instant-1.2"]
 custom_models = [model.strip() for model in config.get("custom_server", "models", fallback="").split(",") if model.strip()]
 
 class MainWindow:
@@ -349,29 +287,6 @@ class MainWindow:
 
         self.update_chat_file_dropdown(file_path)
 
-    def count_tokens(self, messages, model):
-        """Return the number of tokens used by a list of messages."""
-        try:
-            encoding = tiktoken.encoding_for_model(model)
-        except KeyError:
-            print("Warning: model not found for token counter. Using cl100k_base encoding.")
-            encoding = tiktoken.get_encoding("cl100k_base")
-        if model == "gpt-3.5-turbo-0301":
-            tokens_per_message = 4  # every message follows <|start|>{role/name}\n{content}<|end|>\n
-            tokens_per_name = -1  # if there's a name, the role is omitted
-        else:
-            tokens_per_message = 3
-            tokens_per_name = 1
-        num_tokens = 0
-        for message in messages:
-            num_tokens += tokens_per_message
-            for key, value in message.items():
-                num_tokens += len(encoding.encode(value))
-                if key == "name":
-                    num_tokens += tokens_per_name
-        num_tokens += 3  # every reply is primed with <|start|>assistant<|message|>
-        return num_tokens
-
     def get_messages_from_chat_history(self):
         messages = [
             {"role": "system", "content": self.system_message_widget.get("1.0", tk.END).strip()}
@@ -391,17 +306,17 @@ class MainWindow:
         messages.append(
             {
                 "role": "system",
-                "content": "The user is saving this chat log. In your next message, please write only a suggested name for the file. It should be in the format 'file-name-is-separated-by-hyphens', it should be descriptive of the chat you had with the user, and it should be very concise - no more than 4 words (and ideally just 2 or 3). Do not acknowledge this system message with any additional words, please simply write the suggested filename."
+                "content": file_naming_prompt
             }
         )
         # remove excess messages beyond context window limit for gpt-3.5-turbo
-        num_tokens = self.count_tokens(messages, "gpt-3.5-turbo")
+        num_tokens = count_tokens(messages, "gpt-3.5-turbo")
         num_messages = len(messages)
         if num_tokens > 4096:
             for i in range(num_messages):
                 if i < 0:
                     break
-                num_tokens_in_this_message = self.count_tokens([messages[num_messages-i-2]], "gpt-3.5-turbo")
+                num_tokens_in_this_message = count_tokens([messages[num_messages-i-2]], "gpt-3.5-turbo")
                 messages[num_messages-i-2]["content"] = ""
                 num_tokens = num_tokens - num_tokens_in_this_message
                 if num_tokens <= 4096:
@@ -430,35 +345,6 @@ class MainWindow:
             self.show_popup()
         self.show_error_popup(message)
 
-    def parse_and_create_image_messages(self, content):
-        url_pattern = r"(https?://[^\s,\"\{\}]+)"
-        parts = re.split(url_pattern, content)
-
-        messages = []
-        for text in parts:
-            if self.is_image_url(text):
-                messages.append({"type": "image_url", "image_url": {"url": text, "detail": self.image_detail_var.get()}})
-            elif messages and messages[-1].get("type") == "text":
-                messages[-1]["text"] += text
-            elif text:
-                messages.append({"type": "text", "text": text})
-        return {"role": "user", "content": messages}
-
-    def is_url(self, str):
-        url_pattern = r"https?://[^\s,\"\{\}]+"
-        return re.match(url_pattern, str)
-
-    def is_image_url(self, url):
-        if not self.is_url(url):
-            return False
-        try:
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            response = requests.head(url, timeout=5, headers=headers)
-            content_type = response.headers.get('Content-Type', '')
-            return 'image' in content_type
-        except requests.RequestException as e:
-            return False
-
     def get_model_max_context_window(self, model):
         if '16k' in model or 'gpt-3.5-turbo-0125' in model:
             return 16384
@@ -471,7 +357,7 @@ class MainWindow:
 
     def check_token_limits(self, messages):
         model_max_context_window = self.get_model_max_context_window(self.model_var.get())
-        num_prompt_tokens = self.count_tokens(messages, self.model_var.get())
+        num_prompt_tokens = count_tokens(messages, self.model_var.get())
         num_completion_tokens = int(self.max_length_var.get())
 
         if num_prompt_tokens + num_completion_tokens > model_max_context_window:
@@ -481,39 +367,6 @@ class MainWindow:
             self.show_error_popup(error_msg)
             return False
         return True
-    
-    # convert messages to format the given model expects
-    def convert_messages_for_model(self, model, messages):
-        if model in vision_models:
-            # Update the messages to include image data if any image URLs are found in the user's input
-            new_messages = []
-            for message in messages:
-                if message["role"] == "user" and "content" in message:
-                    # Check for image URLs and create a single message with a 'content' array
-                    message_with_images = self.parse_and_create_image_messages(message["content"])
-                    new_messages.append(message_with_images)
-                else:
-                    # System or assistant messages are added unchanged
-                    new_messages.append(message)
-            return new_messages, None
-        elif model in anthropic_models:
-            # Anthropic API has a bunch of extra requirements not present in OpenAI's API
-            anthropic_messages = []
-            system_content = ""
-            for message in messages:
-                if message["role"] == "system":
-                    system_content += message["content"] + "\n"
-                elif message["content"]:
-                    anthropic_messages.append({"role": message["role"], "content": message["content"]})
-            if len(anthropic_messages) == 0 or anthropic_messages[0]["role"] == "assistant":
-                anthropic_messages.insert(0, {"role": "user", "content": "<no message>"})
-            for i in range(len(anthropic_messages) - 1, 0, -1):
-                if anthropic_messages[i]["role"] == anthropic_messages[i - 1]["role"]:
-                    anthropic_messages.insert(i, {"role": "user" if anthropic_messages[i]["role"] == "assistant" else "assistant", "content": "<no message>"})
-            if anthropic_messages[-1]["role"] == "assistant":
-                anthropic_messages.append({"role": "user", "content": "<no message>"})
-            return anthropic_messages, system_content
-        return messages, None
 
     def stream_openai_model_output(self, messages):
         async def streaming_chat_completion():
@@ -560,7 +413,7 @@ class MainWindow:
         async def streaming_anthropic_chat_completion():
             with anthropic_client.messages.stream(
                     model=self.model_var.get(),
-                    max_tokens=min(self.max_length_var.get(), 4000),
+                    max_tokens=min(self.max_length_var.get(), 4000), # 4000 is the max tokens for anthropic
                     messages=messages,
                     system=system_message.strip(),
                     temperature=self.temperature_var.get()
@@ -585,7 +438,7 @@ class MainWindow:
         messages = self.get_messages_from_chat_history()
         if not self.check_token_limits(messages):
             return
-        messages, anthropic_system_message = self.convert_messages_for_model(self.model_var.get(), messages)
+        messages, anthropic_system_message = convert_messages_for_model(self.model_var.get(), messages, self.image_detail_var.get())
         # send request
         def request_thread():
             model_name = self.model_var.get()
@@ -1021,37 +874,10 @@ class MainWindow:
 
     def show_token_count(self):
         messages = self.get_messages_from_chat_history()
-        num_input_tokens = self.count_tokens(messages, self.model_var.get())
+        num_input_tokens = count_tokens(messages, self.model_var.get())
         num_output_tokens = self.max_length_var.get()
         total_tokens = num_input_tokens + num_output_tokens
         model = self.model_var.get()
-        # Pricing information per 1000 tokens
-        pricing_info = {
-            "gpt-4-turbo": {"input": 0.01, "output": 0.03},
-            "gpt-4-turbo-2024-04-09": {"input": 0.01, "output": 0.03},
-            "gpt-4-0125-preview": {"input": 0.01, "output": 0.03},
-            "gpt-4-1106-preview": {"input": 0.01, "output": 0.03},
-            "gpt-4-1106-vision-preview": {"input": 0.01, "output": 0.03},
-            "gpt-4-vision-preview": {"input": 0.01, "output": 0.03},
-            "gpt-4": {"input": 0.03, "output": 0.06},
-            "gpt-4-0613": {"input": 0.03, "output": 0.06},
-            "gpt-4-0314": {"input": 0.03, "output": 0.06},
-            "gpt-4-32k": {"input": 0.06, "output": 0.12},
-            "gpt-3.5-turbo-0125": {"input": 0.0005, "output": 0.0015},
-            "gpt-3.5-turbo": {"input": 0.0010, "output": 0.0020},
-            "gpt-3.5-turbo-0613": {"input": 0.0010, "output": 0.0020},
-            "gpt-3.5-turbo-0301": {"input": 0.0010, "output": 0.0020},
-            "gpt-3.5-turbo-16k": {"input": 0.0010, "output": 0.0020},
-            "gpt-3.5-turbo-1106": {"input": 0.0010, "output": 0.0020},
-            "gpt-3.5-turbo-instruct": {"input": 0.0015, "output": 0.0020},
-            "claude-3-opus-20240229": {"input": 0.015, "output": 0.075},
-            "claude-3-sonnet-20240229": {"input": 0.003, "output": 0.015},
-            "claude-3-haiku-20240307": {"input": 0.00025, "output": 0.00125},
-            "claude-2.1": {"input": 0.008, "output": 0.024},
-            "claude-2.0": {"input": 0.008, "output": 0.024},
-            "claude-instant-1.2": {"input": 0.0008, "output": 0.0024},
-        }
-
 
         # Calculate input and output costs for non-vision models
         input_cost = pricing_info[model]["input"] * num_input_tokens / 1000 if model in pricing_info else 0
@@ -1060,13 +886,9 @@ class MainWindow:
         cost_message = f"Input Cost: ${input_cost:.5f}\nOutput Cost: ${output_cost:.5f}"
 
         if model in vision_models:
-            # Estimation for high detail image cost based on a 1024x1024 image
-            # todo: get the actual image sizes for a more accurate estimation
-            high_detail_cost_per_image = (170 * 4 + 85) / 1000 * 0.01  # 4 tiles for 1024x1024 + base tokens
-
             # Count the number of images in the messages
             num_images = 0
-            parsed_messages = [self.parse_and_create_image_messages(message.get("content","")) for message in messages]
+            parsed_messages = [parse_and_create_image_messages(message.get("content",""), self.image_detail_var.get()) for message in messages]
             for message in parsed_messages:
                 for content in message["content"]:
                     if "image_url" in content.get("type", ""):
@@ -1075,9 +897,7 @@ class MainWindow:
             # Calculate vision cost if the model is vision preview
             vision_cost = 0
             if self.image_detail_var.get() == "low":
-                # Fixed cost for low detail images
-                vision_cost_per_image = 0.00085
-                vision_cost = vision_cost_per_image * num_images
+                vision_cost = low_detail_cost_per_image * num_images
             else:
                 # Estimated cost for high detail images
                 vision_cost = high_detail_cost_per_image * num_images
