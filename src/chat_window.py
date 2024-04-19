@@ -30,8 +30,8 @@ class ChatWindow:
 
         self.is_streaming_cancelled = False
 
-        self.popup = None
-        self.popup_frame = None
+        self.settings_window = None
+        self.settings_frame = None
 
         self.client = OpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
         self.aclient = AsyncOpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
@@ -105,11 +105,11 @@ class ChatWindow:
         # Submit button
         self.submit_button_text = tk.StringVar()  # Create a StringVar variable to control the text of the submit button
         self.submit_button_text.set("Submit")  # Set the initial text of the submit button to "Submit"
-        self.submit_button = ttk.Button(self.main_frame, textvariable=self.submit_button_text, command=self.send_request)  # Use textvariable instead of text
+        self.submit_button = ttk.Button(self.main_frame, textvariable=self.submit_button_text, command=self.submit_chat_request)  # Use textvariable instead of text
         self.submit_button.grid(row=7, column=7, sticky="e")
 
         # Add a new button for counting tokens (new code)
-        self.token_count_button = ttk.Button(self.main_frame, text="Count Tokens", command=self.show_token_count)
+        self.token_count_button = ttk.Button(self.main_frame, text="Count Tokens", command=self.show_token_count_message)
         self.token_count_button.grid(row=7, column=0, sticky="w")  # Place it on the bottom left, same row as 'Submit'
 
         self.add_message("user", "")
@@ -163,7 +163,7 @@ class ChatWindow:
         # Update image detail visibility based on selected model
         self.model_var.trace("w", self.update_image_detail_visibility)
         # Create the hamburger menu button and bind it to the show_popup function
-        self.hamburger_button = ttk.Button(self.configuration_frame, text="≡", command=self.show_popup)
+        self.hamburger_button = ttk.Button(self.configuration_frame, text="≡", command=self.show_settings_window)
         self.hamburger_button.grid(row=config_row, column=9, padx=10, pady=10, sticky="w")
 
         self.default_bg_color = self.get_default_bg_color(self.app)
@@ -200,7 +200,7 @@ class ChatWindow:
         self.inner_frame.bind("<Configure>", self.configure_scrollregion)
         self.app.bind("<Configure>", self.update_entry_widths)
         self.app.bind_class('Entry', '<FocusOut>', self.update_previous_focused_widget)
-        self.app.bind("<Escape>", lambda event: self.show_popup())
+        self.app.bind("<Escape>", lambda event: self.show_settings_window())
         # Bind Command-N to open new windows (Control-N on Windows/Linux)
         # modifier = 'Command' if sys.platform == 'darwin' else 'Control'
         modifier = 'Control'
@@ -290,24 +290,6 @@ class ChatWindow:
         suggested_filename = response.choices[0].message.content.strip()
         return suggested_filename
 
-    def show_error_popup(self, message):
-        error_popup = tk.Toplevel(self.app)
-        error_popup.title("Error")
-        error_popup.geometry("350x100")
-
-        error_label = ttk.Label(error_popup, text=message, wraplength=300)
-        error_label.pack(padx=20, pady=20)
-
-        error_popup.focus_force()
-        self.center_popup_over_main_window(error_popup, self.app, 0, -150)
-
-    def show_error_and_open_settings(self, message):
-        if self.popup is not None:
-            self.popup.focus_force()
-        else:
-            self.show_popup()
-        self.show_error_popup(message)
-
     def check_token_limits(self, messages):
         model = self.model_var.get()
         model_max_context_window = MODEL_INFO[model]["max_tokens"] if model in MODEL_INFO else 128000
@@ -321,6 +303,22 @@ class ChatWindow:
             self.show_error_popup(error_msg)
             return False
         return True
+
+    def submit_chat_request(self):
+        messages = self.get_messages_from_chat_history()
+        if not self.check_token_limits(messages):
+            return
+        messages, anthropic_system_message = convert_messages_for_model(self.model_var.get(), messages, self.image_detail_var.get())
+        # send request
+        def request_thread():
+            model_name = self.model_var.get()
+            if model_name in ANTHROPIC_MODELS:
+                self.stream_anthropic_model_output(messages, anthropic_system_message)
+            else:
+                self.stream_openai_model_output(messages)
+        self.is_streaming_cancelled = False
+        self.set_submit_button(False)
+        Thread(target=request_thread).start()
 
     def stream_openai_model_output(self, messages):
         async def streaming_chat_completion():
@@ -387,22 +385,6 @@ class ChatWindow:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(streaming_anthropic_chat_completion())
-
-    def send_request(self):
-        messages = self.get_messages_from_chat_history()
-        if not self.check_token_limits(messages):
-            return
-        messages, anthropic_system_message = convert_messages_for_model(self.model_var.get(), messages, self.image_detail_var.get())
-        # send request
-        def request_thread():
-            model_name = self.model_var.get()
-            if model_name in ANTHROPIC_MODELS:
-                self.stream_anthropic_model_output(messages, anthropic_system_message)
-            else:
-                self.stream_openai_model_output(messages)
-        self.is_streaming_cancelled = False
-        self.set_submit_button(False)
-        Thread(target=request_thread).start()
 
     def update_chat_file_dropdown(self, new_file_path):
         # Refresh the list of chat files from the directory
@@ -565,45 +547,25 @@ class ChatWindow:
         else:
             message["role"].set("user")
 
+    def set_submit_button(self, active):
+        if active:
+            self.submit_button_text.set("Submit")
+            self.submit_button.configure(command=self.submit_chat_request)
+        else:
+            self.submit_button_text.set("Cancel")
+            self.submit_button.configure(command=self.cancel_streaming)
+
     def configure_scrollregion(self, event):
         self.chat_frame.configure(scrollregion=self.chat_frame.bbox("all"))
-
-    def save_api_key(self):
-        if self.apikey_var.get() != "":
-            self.client = OpenAI(api_key=self.apikey_var.get(), organization=self.orgid_var.get())
-            self.aclient = AsyncOpenAI(api_key=self.apikey_var.get(), organization=self.orgid_var.get())
-            self.config.set("openai", "api_key", self.client.api_key)
-            self.config.set("openai", "organization", self.client.organization)
-        if self.anthropic_apikey_var.get() != "":
-            self.anthropic_client = anthropic.Anthropic(api_key=self.anthropic_apikey_var.get())
-            self.config.set("anthropic", "api_key", self.anthropic_client.api_key)
-        if self.custom_baseurl_var.get() != "":
-            self.custom_aclient = AsyncOpenAI(base_url = self.config.get("custom_server", "base_url", fallback=""), api_key=self.config.get("custom_server", "api_key", fallback="ollama"),)
-            self.config.set("custom_server", "base_url", str(self.custom_aclient.base_url))
-            self.config.set("custom_server", "api_key", self.custom_aclient.api_key)
-        if self.custom_models_var.get() != "":
-            self.custom_models.clear()
-            self.custom_models.extend([model.strip() for model in self.custom_models_var.get().split(",") if model.strip()])
-            self.config.set("custom_server", "models", self.custom_models_var.get())
-            self.update_models_dropdown()
-
-        with open("config.ini", "w") as config_file:
-            self.config.write(config_file)
 
     def add_message_via_button(self):
         self.add_message("user" if len(self.chat_history) == 0 or self.chat_history[-1]["role"].get() == "assistant" else "assistant", "")
 
-    def prompt_paste_from_clipboard(self, event, entry):
-        # Check if the previously focused widget is the same as the clicked one
-        if self.previous_focused_widget != entry:
-            clipboard_content = self.app.clipboard_get()
-            if messagebox.askyesno("Paste from Clipboard", f"Do you want to paste the following content from the clipboard?\n\n{clipboard_content}"):
-                entry.delete(0, tk.END)
-                entry.insert(0, clipboard_content)
-        self.previous_focused_widget = entry
-
-    def update_previous_focused_widget(self, event):
-        self.previous_focused_widget = event.widget
+    def update_image_detail_visibility(self, *args):
+        if self.model_var.get() in OPENAI_VISION_MODELS:
+            self.image_detail_dropdown.grid(row=0, column=8, sticky="ne")
+        else:
+            self.image_detail_dropdown.grid_remove()
 
     # Functions for synchronizing slider and entry
     def on_temp_entry_change(self, *args):
@@ -625,61 +587,6 @@ class ChatWindow:
                 raise ValueError
         except ValueError:
             self.max_len_entry_var.set(self.max_length_var.get())
-
-    def save_dark_mode_state(self):
-        self.config.set("app", "dark_mode", str(self.dark_mode_var.get()))
-        with open("config.ini", "w") as f:
-            self.config.write(f)
-
-    def load_dark_mode_state(self):
-        return self.config.getboolean("app", "dark_mode", fallback=False)
-
-    def toggle_dark_mode(self):
-        if self.dark_mode_var.get():
-            self.app.configure(bg="#2c2c2c")
-            self.main_frame.configure(style="Dark.TFrame")
-            self.configuration_frame.configure(style="Dark.TFrame")
-            self.chat_frame.configure(bg="#2c2c2c") # Change chat_frame background color
-            self.inner_frame.configure(style="Dark.TFrame")
-
-            for widget in self.main_frame.winfo_children():
-                if isinstance(widget, (ttk.Label, ttk.OptionMenu, ttk.Checkbutton)):
-                    widget.configure(style="Dark." + widget.winfo_class())
-            for widget in self.configuration_frame.winfo_children():
-                if isinstance(widget, (ttk.Label, ttk.OptionMenu, ttk.Checkbutton)):
-                    widget.configure(style="Dark." + widget.winfo_class())
-            if self.popup_frame is not None:
-                self.popup_frame.configure(style="Dark.TFrame")
-                for widget in self.popup_frame.winfo_children():
-                    if isinstance(widget, (ttk.Label, ttk.OptionMenu, ttk.Checkbutton)):
-                        widget.configure(style="Dark." + widget.winfo_class())
-        else:
-            self.app.configure(bg=self.default_bg_color)
-            self.main_frame.configure(style="")
-            self.configuration_frame.configure(style="")
-            self.chat_frame.configure(bg=self.default_bg_color) # Reset chat_frame background color
-            self.inner_frame.configure(style="")
-
-            for widget in self.main_frame.winfo_children():
-                if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
-                    widget.configure(style=widget.winfo_class())
-            for widget in self.configuration_frame.winfo_children():
-                if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
-                    widget.configure(style=widget.winfo_class())
-            if self.popup_frame is not None:
-                self.popup_frame.configure(style="")
-                for widget in self.popup_frame.winfo_children():
-                    if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
-                        widget.configure(style=widget.winfo_class())
-        self.save_dark_mode_state()
-
-    def get_default_bg_color(self, root):
-        # Create a temporary button widget to get the default background color
-        temp_button = tk.Button(root)
-        default_bg_color = temp_button.cget('bg')
-        # Destroy the temporary button
-        temp_button.destroy()
-        return default_bg_color
 
     def on_close(self):
         # Generate a timestamp string with the format "YYYYMMDD_HHMMSS"
@@ -721,111 +628,25 @@ class ChatWindow:
         # Close the application
         self.app.destroy()
 
-    def on_config_changed(self, *args):
-        self.save_api_key()
+    def show_error_popup(self, message):
+        error_popup = tk.Toplevel(self.app)
+        error_popup.title("Error")
+        error_popup.geometry("350x100")
 
-    def on_popup_close(self):
-        self.popup.destroy()
-        self.popup = None
+        error_label = ttk.Label(error_popup, text=message, wraplength=300)
+        error_label.pack(padx=20, pady=20)
 
-    def close_popup(self):
-        if self.popup is not None:
-            self.popup.destroy()
-            self.popup = None
+        error_popup.focus_force()
+        self.center_popup_over_chat_window(error_popup, self.app, 0, -150)
 
-    def center_popup_over_main_window(self, popup_window, main_window, x_offset=0, y_offset=0):
-        main_window.update_idletasks()
-
-        main_window_width = main_window.winfo_width()
-        main_window_height = main_window.winfo_height()
-        main_window_x = main_window.winfo_rootx()
-        main_window_y = main_window.winfo_rooty()
-
-        popup_width = popup_window.winfo_reqwidth()
-        popup_height = popup_window.winfo_reqheight()
-
-        x_position = main_window_x + (main_window_width // 2) - (popup_width // 2) + x_offset
-        y_position = main_window_y + (main_window_height // 2) - (popup_height // 2) + y_offset
-
-        popup_window.geometry(f"+{x_position}+{y_position}")
-
-    def show_popup(self):
-        # If the popup already exists, close it and set popup to None
-        if self.popup is not None:
-            self.popup.destroy()
-            self.popup = None
-            return
-
-        self.popup = tk.Toplevel(self.app)
-        self.popup.title("Settings")
-        self.popup_frame = ttk.Frame(self.popup, padding="3")
-        self.popup_frame.grid(row=0, column=0, sticky="new")
-
-        # Add API key / Org ID configurations
-        ttk.Label(self.popup_frame, text="API Key:").grid(row=0, column=0, sticky="e")
-        apikey_entry = ttk.Entry(self.popup_frame, textvariable=self.apikey_var, width=60)
-        apikey_entry.grid(row=0, column=1, sticky="e")
-
-        ttk.Label(self.popup_frame, text="Org ID:").grid(row=1, column=0, sticky="e")
-        orgid_entry = ttk.Entry(self.popup_frame, textvariable=self.orgid_var, width=60)
-        orgid_entry.grid(row=1, column=1, sticky="e")
-
-        # Add Anthropic API key configuration
-        ttk.Label(self.popup_frame, text="Anthropic API Key:").grid(row=2, column=0, sticky="e")
-        anthropic_apikey_entry = ttk.Entry(self.popup_frame, textvariable=self.anthropic_apikey_var, width=60)
-        anthropic_apikey_entry.grid(row=2, column=1, sticky="e")
-
-        # Add Custom Server configuration
-        ttk.Separator(self.popup_frame, orient='horizontal').grid(row=3, column=0, columnspan=2, sticky="we", pady=10)
-        ttk.Label(self.popup_frame, text="Custom Server Configuration").grid(row=4, column=0, sticky="e")
-        ttk.Label(self.popup_frame, text="Base URL:").grid(row=5, column=0, sticky="e")
-        custom_baseurl_entry = ttk.Entry(self.popup_frame, textvariable=self.custom_baseurl_var, width=60)
-        custom_baseurl_entry.grid(row=5, column=1, sticky="e")
-        ttk.Label(self.popup_frame, text="API Key:").grid(row=6, column=0, sticky="e")
-        custom_apikey_entry = ttk.Entry(self.popup_frame, textvariable=self.custom_apikey_var, width=60)
-        custom_apikey_entry.grid(row=6, column=1, sticky="e")
-        ttk.Label(self.popup_frame, text="Models (comma-separated):").grid(row=7, column=0, sticky="e")
-        custom_models_entry = ttk.Entry(self.popup_frame, textvariable=self.custom_models_var, width=60)
-        custom_models_entry.grid(row=7, column=1, sticky="e")
-
-        # Create a Checkbutton widget for dark mode toggle
-        ttk.Separator(self.popup_frame, orient='horizontal').grid(row=8, column=0, columnspan=2, sticky="we", pady=10)
-        self.dark_mode_var.set(self.load_dark_mode_state())
-        dark_mode_checkbutton = ttk.Checkbutton(self.popup_frame, text="Dark mode", variable=self.dark_mode_var, command=self.toggle_dark_mode)
-        dark_mode_checkbutton.grid(row=9, column=0, columnspan=2, padx=10, pady=10, sticky="w")
-        # Add a button to close the popup
-        close_button = ttk.Button(self.popup_frame, text="Close", command=self.close_popup)
-        close_button.grid(row=100, column=0, columnspan=2, pady=10)
-        self.toggle_dark_mode()
-        # Bind the on_popup_close function to the WM_DELETE_WINDOW protocol
-        self.popup.protocol("WM_DELETE_WINDOW", self.on_popup_close)
-        # Bind events for api/org clipboard prompts, only in Android
-        if(self.os_name == 'Android'):
-            apikey_entry.bind("<Button-1>", lambda event, entry=apikey_entry: self.prompt_paste_from_clipboard(event, entry))
-            orgid_entry.bind("<Button-1>", lambda event, entry=orgid_entry: self.prompt_paste_from_clipboard(event, entry))
-            apikey_entry.bind("<FocusOut>", self.update_previous_focused_widget)
-            orgid_entry.bind("<FocusOut>", self.update_previous_focused_widget)
-
-        # Center the popup over the main window
-        self.center_popup_over_main_window(self.popup, self.app)
-
-        self.popup.focus_force()
-
-    def set_submit_button(self, active):
-        if active:
-            self.submit_button_text.set("Submit")
-            self.submit_button.configure(command=self.send_request)
+    def show_error_and_open_settings(self, message):
+        if self.settings_window is not None:
+            self.settings_window.focus_force()
         else:
-            self.submit_button_text.set("Cancel")
-            self.submit_button.configure(command=self.cancel_streaming)
+            self.show_settings_window()
+        self.show_error_popup(message)
 
-    def update_image_detail_visibility(self, *args):
-        if self.model_var.get() in OPENAI_VISION_MODELS:
-            self.image_detail_dropdown.grid(row=0, column=8, sticky="ne")
-        else:
-            self.image_detail_dropdown.grid_remove()
-
-    def show_token_count(self):
+    def show_token_count_message(self):
         messages = self.get_messages_from_chat_history()
         num_input_tokens = count_tokens(messages, self.model_var.get())
         num_output_tokens = self.max_length_var.get()
@@ -858,6 +679,185 @@ class ChatWindow:
             cost_message += f"\nVision Cost: ${total_cost:.5f} for {num_images} images"
 
         messagebox.showinfo("Token Count and Cost", f"Number of tokens: {total_tokens} (Input: {num_input_tokens}, Output: {num_output_tokens})\n{cost_message}")
+
+    def on_config_changed(self, *args):
+        self.save_api_key()
+
+    def save_api_key(self):
+        if self.apikey_var.get() != "":
+            self.client = OpenAI(api_key=self.apikey_var.get(), organization=self.orgid_var.get())
+            self.aclient = AsyncOpenAI(api_key=self.apikey_var.get(), organization=self.orgid_var.get())
+            self.config.set("openai", "api_key", self.client.api_key)
+            self.config.set("openai", "organization", self.client.organization)
+        if self.anthropic_apikey_var.get() != "":
+            self.anthropic_client = anthropic.Anthropic(api_key=self.anthropic_apikey_var.get())
+            self.config.set("anthropic", "api_key", self.anthropic_client.api_key)
+        if self.custom_baseurl_var.get() != "":
+            self.custom_aclient = AsyncOpenAI(base_url = self.config.get("custom_server", "base_url", fallback=""), api_key=self.config.get("custom_server", "api_key", fallback="ollama"),)
+            self.config.set("custom_server", "base_url", str(self.custom_aclient.base_url))
+            self.config.set("custom_server", "api_key", self.custom_aclient.api_key)
+        if self.custom_models_var.get() != "":
+            self.custom_models.clear()
+            self.custom_models.extend([model.strip() for model in self.custom_models_var.get().split(",") if model.strip()])
+            self.config.set("custom_server", "models", self.custom_models_var.get())
+            self.update_models_dropdown()
+
+        with open("config.ini", "w") as config_file:
+            self.config.write(config_file)
+
+    def save_dark_mode_state(self):
+        self.config.set("app", "dark_mode", str(self.dark_mode_var.get()))
+        with open("config.ini", "w") as f:
+            self.config.write(f)
+
+    def load_dark_mode_state(self):
+        return self.config.getboolean("app", "dark_mode", fallback=False)
+
+    def toggle_dark_mode(self):
+        if self.dark_mode_var.get():
+            self.app.configure(bg="#2c2c2c")
+            self.main_frame.configure(style="Dark.TFrame")
+            self.configuration_frame.configure(style="Dark.TFrame")
+            self.chat_frame.configure(bg="#2c2c2c") # Change chat_frame background color
+            self.inner_frame.configure(style="Dark.TFrame")
+
+            for widget in self.main_frame.winfo_children():
+                if isinstance(widget, (ttk.Label, ttk.OptionMenu, ttk.Checkbutton)):
+                    widget.configure(style="Dark." + widget.winfo_class())
+            for widget in self.configuration_frame.winfo_children():
+                if isinstance(widget, (ttk.Label, ttk.OptionMenu, ttk.Checkbutton)):
+                    widget.configure(style="Dark." + widget.winfo_class())
+            if self.settings_frame is not None:
+                self.settings_frame.configure(style="Dark.TFrame")
+                for widget in self.settings_frame.winfo_children():
+                    if isinstance(widget, (ttk.Label, ttk.OptionMenu, ttk.Checkbutton)):
+                        widget.configure(style="Dark." + widget.winfo_class())
+        else:
+            self.app.configure(bg=self.default_bg_color)
+            self.main_frame.configure(style="")
+            self.configuration_frame.configure(style="")
+            self.chat_frame.configure(bg=self.default_bg_color) # Reset chat_frame background color
+            self.inner_frame.configure(style="")
+
+            for widget in self.main_frame.winfo_children():
+                if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
+                    widget.configure(style=widget.winfo_class())
+            for widget in self.configuration_frame.winfo_children():
+                if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
+                    widget.configure(style=widget.winfo_class())
+            if self.settings_frame is not None:
+                self.settings_frame.configure(style="")
+                for widget in self.settings_frame.winfo_children():
+                    if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
+                        widget.configure(style=widget.winfo_class())
+        self.save_dark_mode_state()
+
+    def get_default_bg_color(self, root):
+        # Create a temporary button widget to get the default background color
+        temp_button = tk.Button(root)
+        default_bg_color = temp_button.cget('bg')
+        # Destroy the temporary button
+        temp_button.destroy()
+        return default_bg_color
+
+    def show_settings_window(self):
+        # If the settings window already exists, close it and set our settings window to None
+        if self.settings_window is not None:
+            self.settings_window.destroy()
+            self.settings_window = None
+            return
+
+        self.settings_window = tk.Toplevel(self.app)
+        self.settings_window.title("Settings")
+        self.settings_frame = ttk.Frame(self.settings_window, padding="3")
+        self.settings_frame.grid(row=0, column=0, sticky="new")
+
+        # Add API key / Org ID configurations
+        ttk.Label(self.settings_frame, text="API Key:").grid(row=0, column=0, sticky="e")
+        apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.apikey_var, width=60)
+        apikey_entry.grid(row=0, column=1, sticky="e")
+
+        ttk.Label(self.settings_frame, text="Org ID:").grid(row=1, column=0, sticky="e")
+        orgid_entry = ttk.Entry(self.settings_frame, textvariable=self.orgid_var, width=60)
+        orgid_entry.grid(row=1, column=1, sticky="e")
+
+        # Add Anthropic API key configuration
+        ttk.Label(self.settings_frame, text="Anthropic API Key:").grid(row=2, column=0, sticky="e")
+        anthropic_apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.anthropic_apikey_var, width=60)
+        anthropic_apikey_entry.grid(row=2, column=1, sticky="e")
+
+        # Add Custom Server configuration
+        ttk.Separator(self.settings_frame, orient='horizontal').grid(row=3, column=0, columnspan=2, sticky="we", pady=10)
+        ttk.Label(self.settings_frame, text="Custom Server Configuration").grid(row=4, column=0, sticky="e")
+        ttk.Label(self.settings_frame, text="Base URL:").grid(row=5, column=0, sticky="e")
+        custom_baseurl_entry = ttk.Entry(self.settings_frame, textvariable=self.custom_baseurl_var, width=60)
+        custom_baseurl_entry.grid(row=5, column=1, sticky="e")
+        ttk.Label(self.settings_frame, text="API Key:").grid(row=6, column=0, sticky="e")
+        custom_apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.custom_apikey_var, width=60)
+        custom_apikey_entry.grid(row=6, column=1, sticky="e")
+        ttk.Label(self.settings_frame, text="Models (comma-separated):").grid(row=7, column=0, sticky="e")
+        custom_models_entry = ttk.Entry(self.settings_frame, textvariable=self.custom_models_var, width=60)
+        custom_models_entry.grid(row=7, column=1, sticky="e")
+
+        # Create a Checkbutton widget for dark mode toggle
+        ttk.Separator(self.settings_frame, orient='horizontal').grid(row=8, column=0, columnspan=2, sticky="we", pady=10)
+        self.dark_mode_var.set(self.load_dark_mode_state())
+        dark_mode_checkbutton = ttk.Checkbutton(self.settings_frame, text="Dark mode", variable=self.dark_mode_var, command=self.toggle_dark_mode)
+        dark_mode_checkbutton.grid(row=9, column=0, columnspan=2, padx=10, pady=10, sticky="w")
+        # Add a button to close the popup
+        close_button = ttk.Button(self.settings_frame, text="Close", command=self.close_settings_window)
+        close_button.grid(row=100, column=0, columnspan=2, pady=10)
+        self.toggle_dark_mode()
+        # Bind the on_popup_close function to the WM_DELETE_WINDOW protocol
+        self.settings_window.protocol("WM_DELETE_WINDOW", self.on_settings_window_close)
+        # Bind events for api/org clipboard prompts, only in Android
+        if(self.os_name == 'Android'):
+            apikey_entry.bind("<Button-1>", lambda event, entry=apikey_entry: self.prompt_paste_from_clipboard(event, entry))
+            orgid_entry.bind("<Button-1>", lambda event, entry=orgid_entry: self.prompt_paste_from_clipboard(event, entry))
+            apikey_entry.bind("<FocusOut>", self.update_previous_focused_widget)
+            orgid_entry.bind("<FocusOut>", self.update_previous_focused_widget)
+
+        # Center the popup over the main window
+        self.center_popup_over_chat_window(self.settings_window, self.app)
+
+        self.settings_window.focus_force()
+
+    def on_settings_window_close(self):
+        self.settings_window.destroy()
+        self.settings_window = None
+
+    def close_settings_window(self):
+        if self.settings_window is not None:
+            self.settings_window.destroy()
+            self.settings_window = None
+
+    def center_popup_over_chat_window(self, popup_window, main_window, x_offset=0, y_offset=0):
+        main_window.update_idletasks()
+
+        main_window_width = main_window.winfo_width()
+        main_window_height = main_window.winfo_height()
+        main_window_x = main_window.winfo_rootx()
+        main_window_y = main_window.winfo_rooty()
+
+        popup_width = popup_window.winfo_reqwidth()
+        popup_height = popup_window.winfo_reqheight()
+
+        x_position = main_window_x + (main_window_width // 2) - (popup_width // 2) + x_offset
+        y_position = main_window_y + (main_window_height // 2) - (popup_height // 2) + y_offset
+
+        popup_window.geometry(f"+{x_position}+{y_position}")
+
+    def prompt_paste_from_clipboard(self, event, entry):
+        # Check if the previously focused widget is the same as the clicked one
+        if self.previous_focused_widget != entry:
+            clipboard_content = self.app.clipboard_get()
+            if messagebox.askyesno("Paste from Clipboard", f"Do you want to paste the following content from the clipboard?\n\n{clipboard_content}"):
+                entry.delete(0, tk.END)
+                entry.insert(0, clipboard_content)
+        self.previous_focused_widget = entry
+
+    def update_previous_focused_widget(self, event):
+        self.previous_focused_widget = event.widget
 
     def create_new_window(self, event):
         # Handle key press event
