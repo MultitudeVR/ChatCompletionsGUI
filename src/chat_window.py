@@ -4,7 +4,6 @@ import openai
 from openai import OpenAI, AsyncOpenAI
 import tkinter as tk
 import os
-import anthropic
 
 from tkinter import ttk
 from tkinter import filedialog
@@ -17,9 +16,12 @@ import random
 import string
 import sys
 from tooltip import ToolTip
-from constants import OPENAI_VISION_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, SYSTEM_MESSAGE_DEFAULT_TEXT, MODEL_INFO, HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE
+from constants import OPENAI_VISION_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, SYSTEM_MESSAGE_DEFAULT_TEXT, \
+    FILE_NAMING_MODEL, MODEL_INFO, HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE
 from prompts import file_naming_prompt
-from utils import convert_messages_for_model, parse_and_create_image_messages, count_tokens
+from utils import convert_messages_for_model, parse_and_create_image_messages, count_tokens, convert_text_to_tokens, convert_tokens_to_text
+
+import anthropic
 
 class ChatWindow:
     def __init__(self, root, config, os_name):
@@ -33,10 +35,13 @@ class ChatWindow:
         self.settings_window = None
         self.settings_frame = None
 
-        self.client = OpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
-        self.aclient = AsyncOpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
-        self.anthropic_client = anthropic.Anthropic(api_key=config.get("anthropic", "api_key", fallback=""))
-        self.custom_aclient = AsyncOpenAI(base_url = config.get("custom_server", "base_url", fallback=""), api_key=config.get("custom_server", "api_key", fallback="ollama"),)
+        if config.get("openai", "api_key", fallback=""):
+            self.openai_client = OpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
+            self.openai_aclient = AsyncOpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
+        if config.get("custom_server", "base_url", fallback=""):
+            self.custom_aclient = AsyncOpenAI(base_url = config.get("custom_server", "base_url", fallback=""), api_key=config.get("custom_server", "api_key", fallback="ollama"),)
+        if config.get("anthropic", "api_key", fallback=""):
+            self.anthropic_client = anthropic.Anthropic(api_key=config.get("anthropic", "api_key", fallback=""))
         self.custom_models = [model.strip() for model in config.get("custom_server", "models", fallback="").split(",") if model.strip()]
         self.config = config
         self.os_name = os_name
@@ -141,8 +146,8 @@ class ChatWindow:
         self.save_button.grid(row=config_row, column=3, sticky="w")
 
         # Add api configuration variables
-        self.apikey_var = tk.StringVar(value=self.client.api_key)
-        self.orgid_var = tk.StringVar(value=self.client.organization)
+        self.apikey_var = tk.StringVar(value=self.openai_client.api_key)
+        self.orgid_var = tk.StringVar(value=self.openai_client.organization)
         self.anthropic_apikey_var = tk.StringVar(value=self.anthropic_client.api_key)
         self.custom_baseurl_var = tk.StringVar(value=self.custom_aclient.base_url)
         self.custom_apikey_var = tk.StringVar(value=self.custom_aclient.api_key)
@@ -264,28 +269,30 @@ class ChatWindow:
         return messages
 
     def request_file_name(self):
+        if not FILE_NAMING_MODEL:
+            return "chat_log.json"
+
         # add to messages a system message informing the AI to create a title
         messages = self.get_messages_from_chat_history()
+        # trim messages if they exceed the token limit
+        num_tokens = count_tokens(messages, FILE_NAMING_MODEL)
+        num_messages = len(messages)
+        if num_tokens > 3500:
+            ratio = 3500 / num_tokens
+            for i in range(num_messages):
+                if i < 0:
+                    break
+                tokens = convert_text_to_tokens(messages[i]["content"], FILE_NAMING_MODEL)
+                messages[i]["content"] = convert_tokens_to_text(tokens[:int(ratio * len(tokens))], FILE_NAMING_MODEL)
+        # get completion
         messages.append(
             {
                 "role": "system",
                 "content": file_naming_prompt
             }
         )
-        # remove excess messages beyond context window limit for gpt-3.5-turbo
-        num_tokens = count_tokens(messages, "gpt-3.5-turbo")
-        num_messages = len(messages)
-        if num_tokens > 4096:
-            for i in range(num_messages):
-                if i < 0:
-                    break
-                num_tokens_in_this_message = count_tokens([messages[num_messages-i-2]], "gpt-3.5-turbo")
-                messages[num_messages-i-2]["content"] = ""
-                num_tokens = num_tokens - num_tokens_in_this_message
-                if num_tokens <= 4096:
-                    break
-        # get completion
-        response = self.client.chat.completions.create(model="gpt-3.5-turbo", messages=messages)
+        print("requesting file name using ", count_tokens(messages, FILE_NAMING_MODEL), "tokens and gpt-3.5-turbo model.")
+        response = self.openai_client.chat.completions.create(model=FILE_NAMING_MODEL, messages=messages)
         # return the filename
         suggested_filename = response.choices[0].message.content.strip()
         return suggested_filename
@@ -322,7 +329,7 @@ class ChatWindow:
 
     def stream_openai_model_output(self, messages):
         async def streaming_chat_completion():
-            streaming_client = self.aclient if self.model_var.get() in OPENAI_MODELS else self.custom_aclient
+            streaming_client = self.openai_aclient if self.model_var.get() in OPENAI_MODELS else self.custom_aclient
             try:
                 response = streaming_client.chat.completions.create(model=self.model_var.get(),
                     messages=messages,
@@ -685,10 +692,10 @@ class ChatWindow:
 
     def save_api_key(self):
         if self.apikey_var.get() != "":
-            self.client = OpenAI(api_key=self.apikey_var.get(), organization=self.orgid_var.get())
-            self.aclient = AsyncOpenAI(api_key=self.apikey_var.get(), organization=self.orgid_var.get())
-            self.config.set("openai", "api_key", self.client.api_key)
-            self.config.set("openai", "organization", self.client.organization)
+            self.openai_client = OpenAI(api_key=self.apikey_var.get(), organization=self.orgid_var.get())
+            self.openai_aclient = AsyncOpenAI(api_key=self.apikey_var.get(), organization=self.orgid_var.get())
+            self.config.set("openai", "api_key", self.openai_client.api_key)
+            self.config.set("openai", "organization", self.openai_client.organization)
         if self.anthropic_apikey_var.get() != "":
             self.anthropic_client = anthropic.Anthropic(api_key=self.anthropic_apikey_var.get())
             self.config.set("anthropic", "api_key", self.anthropic_client.api_key)
@@ -773,11 +780,11 @@ class ChatWindow:
         self.settings_frame.grid(row=0, column=0, sticky="new")
 
         # Add API key / Org ID configurations
-        ttk.Label(self.settings_frame, text="API Key:").grid(row=0, column=0, sticky="e")
+        ttk.Label(self.settings_frame, text="OpenAI API Key:").grid(row=0, column=0, sticky="e")
         apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.apikey_var, width=60)
         apikey_entry.grid(row=0, column=1, sticky="e")
 
-        ttk.Label(self.settings_frame, text="Org ID:").grid(row=1, column=0, sticky="e")
+        ttk.Label(self.settings_frame, text="OpenAI Org ID:").grid(row=1, column=0, sticky="e")
         orgid_entry = ttk.Entry(self.settings_frame, textvariable=self.orgid_var, width=60)
         orgid_entry.grid(row=1, column=1, sticky="e")
 
