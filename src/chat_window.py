@@ -35,13 +35,11 @@ class ChatWindow:
         self.settings_window = None
         self.settings_frame = None
 
-        if config.get("openai", "api_key", fallback=""):
-            self.openai_client = OpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
-            self.openai_aclient = AsyncOpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
-        if config.get("custom_server", "base_url", fallback=""):
-            self.custom_aclient = AsyncOpenAI(base_url = config.get("custom_server", "base_url", fallback=""), api_key=config.get("custom_server", "api_key", fallback="ollama"),)
-        if config.get("anthropic", "api_key", fallback=""):
-            self.anthropic_client = anthropic.Anthropic(api_key=config.get("anthropic", "api_key", fallback=""))
+        self.openai_client = OpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
+        self.openai_aclient = AsyncOpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
+        self.custom_aclient = AsyncOpenAI(base_url = config.get("custom_server", "base_url", fallback=""), api_key=config.get("custom_server", "api_key", fallback="ollama"),)
+        self.anthropic_client = anthropic.Anthropic(api_key=config.get("anthropic", "api_key", fallback=""))
+
         self.custom_models = [model.strip() for model in config.get("custom_server", "models", fallback="").split(",") if model.strip()]
         self.config = config
         self.os_name = os_name
