@@ -1,6 +1,6 @@
 
 SYSTEM_MESSAGE_DEFAULT_TEXT = ""
-FILE_NAMING_MODEL="gpt-3.5-turbo" # if empty, won't name files automatically
+DEFAULT_FILE_NAMING_MODEL="gpt-3.5-turbo" # if empty, won't name files automatically
 OPENAI_MODELS = [
     "gpt-3.5-turbo",
     "gpt-4-turbo",

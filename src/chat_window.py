@@ -17,22 +17,12 @@ import string
 import sys
 from tooltip import ToolTip
 from constants import OPENAI_VISION_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, SYSTEM_MESSAGE_DEFAULT_TEXT, \
-    FILE_NAMING_MODEL, MODEL_INFO, HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE
+    DEFAULT_FILE_NAMING_MODEL, MODEL_INFO, HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE
 from prompts import file_naming_prompt
 from utils import convert_messages_for_model, parse_and_create_image_messages, count_tokens, convert_text_to_tokens, convert_tokens_to_text
+from custom_server import CustomServer
 
 import anthropic
-
-class CustomServer:
-    def __init__(self, base_url, api_key, org_id, models, on_config_changed):
-        self.models = models
-        self.client = AsyncOpenAI(base_url=base_url, api_key=api_key, organization=org_id)
-        self.baseurl_var = tk.StringVar(value=self.client.base_url)
-        self.apikey_var = tk.StringVar(value=self.client.api_key)
-        self.models_var = tk.StringVar(value=", ".join(self.models))
-        self.baseurl_var.trace("w", on_config_changed)
-        self.apikey_var.trace("w", on_config_changed)
-        self.models_var.trace("w", on_config_changed)
 
 class ChatWindow:
     def __init__(self, root, config, os_name):
@@ -195,6 +185,8 @@ class ChatWindow:
             self.dark_mode_var.set(True)
             self.toggle_dark_mode()
 
+        self.file_naming_model_var = tk.StringVar(value=DEFAULT_FILE_NAMING_MODEL)
+
         # Add a separator
         ttk.Separator(self.configuration_frame, orient='horizontal').grid(row=config_row+1, column=0, columnspan=10, sticky="we", pady=3)
 
@@ -279,21 +271,21 @@ class ChatWindow:
         return messages
 
     def request_file_name(self):
-        if not FILE_NAMING_MODEL:
+        if not self.file_naming_model_var.get():
             return "chat_log.json"
-
+        file_naming_model = self.file_naming_model_var.get()
         # add to messages a system message informing the AI to create a title
         messages = self.get_messages_from_chat_history()
         # trim messages if they exceed the token limit
-        num_tokens = count_tokens(messages, FILE_NAMING_MODEL)
+        num_tokens = count_tokens(messages, file_naming_model)
         num_messages = len(messages)
         if num_tokens > 3500:
             ratio = 3500 / num_tokens
             for i in range(num_messages):
                 if i < 0:
                     break
-                tokens = convert_text_to_tokens(messages[i]["content"], FILE_NAMING_MODEL)
-                messages[i]["content"] = convert_tokens_to_text(tokens[:int(ratio * len(tokens))], FILE_NAMING_MODEL)
+                tokens = convert_text_to_tokens(messages[i]["content"], file_naming_model)
+                messages[i]["content"] = convert_tokens_to_text(tokens[:int(ratio * len(tokens))], file_naming_model)
         # get completion
         messages.append(
             {
@@ -301,8 +293,8 @@ class ChatWindow:
                 "content": file_naming_prompt
             }
         )
-        print("requesting file name using ", count_tokens(messages, FILE_NAMING_MODEL), f"tokens and {FILE_NAMING_MODEL} model.")
-        response = self.openai_client.chat.completions.create(model=FILE_NAMING_MODEL, messages=messages)
+        print("requesting file name using ", count_tokens(messages, file_naming_model), f"tokens and {file_naming_model} model.")
+        response = self.openai_client.chat.completions.create(model=file_naming_model, messages=messages)
         # return the filename
         suggested_filename = response.choices[0].message.content.strip()
         return suggested_filename
@@ -731,6 +723,8 @@ class ChatWindow:
                 custom_server.models.clear()
                 custom_server.models.extend([model.strip() for model in custom_server.models_var.get().split(",") if model.strip()])
                 self.config.set(f"custom_server_{i}", "models", custom_server.models_var.get())
+
+        self.config.set("app", "file_naming_model", self.file_naming_model_var.get())
         self.update_models_dropdown()
 
         with open("config.ini", "w") as config_file:
@@ -838,8 +832,13 @@ class ChatWindow:
         anthropic_apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.anthropic_apikey_var, width=60)
         anthropic_apikey_entry.grid(row=3, column=1, sticky="e")
 
+        # Add file naming model configuration
+        ttk.Label(self.settings_frame, text="File Naming Model (OpenAI only):").grid(row=4, column=0, sticky="e")
+        file_naming_model_entry = ttk.Entry(self.settings_frame, textvariable=self.file_naming_model_var, width=60)
+        file_naming_model_entry.grid(row=4, column=1, sticky="e")
+
         # Add Custom Server configuration
-        cur_row = 4
+        cur_row = 5
         for i, custom_server in enumerate(self.custom_servers):
             ttk.Separator(self.settings_frame, orient='horizontal').grid(row=cur_row, column=0, columnspan=2, sticky="we", pady=10)
             ttk.Label(self.settings_frame, text=f"Custom Server {i+1} Configuration").grid(row=cur_row+1, column=0, sticky="e")
