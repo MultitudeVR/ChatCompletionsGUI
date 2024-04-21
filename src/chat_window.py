@@ -23,10 +23,23 @@ from utils import convert_messages_for_model, parse_and_create_image_messages, c
 
 import anthropic
 
+class CustomServer:
+    def __init__(self, base_url, api_key, org_id, models, on_config_changed):
+        self.models = models
+        self.client = AsyncOpenAI(base_url=base_url, api_key=api_key, organization=org_id)
+        self.baseurl_var = tk.StringVar(value=self.client.base_url)
+        self.apikey_var = tk.StringVar(value=self.client.api_key)
+        self.models_var = tk.StringVar(value=", ".join(self.models))
+        self.baseurl_var.trace("w", on_config_changed)
+        self.apikey_var.trace("w", on_config_changed)
+        self.models_var.trace("w", on_config_changed)
+
 class ChatWindow:
     def __init__(self, root, config, os_name):
-        # Initialize the main application window
         self.app = root
+        self.config = config
+        self.os_name = os_name
+        # Initialize the main application window
         self.app.geometry("800x600")
         self.app.title("Chat Completions GUI")
 
@@ -35,14 +48,28 @@ class ChatWindow:
         self.settings_window = None
         self.settings_frame = None
 
-        self.openai_client = OpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
-        self.openai_aclient = AsyncOpenAI(api_key=config.get("openai", "api_key", fallback="insert-key"), organization=config.get("openai", "organization", fallback=""))
-        self.custom_aclient = AsyncOpenAI(base_url = config.get("custom_server", "base_url", fallback=""), api_key=config.get("custom_server", "api_key", fallback="ollama"),)
+        self.openai_client = OpenAI(api_key=config.get("openai", "api_key", fallback=""), organization=config.get("openai", "organization", fallback=""))
+        self.openai_aclient = AsyncOpenAI(api_key=config.get("openai", "api_key", fallback=""), organization=config.get("openai", "organization", fallback=""))
         self.anthropic_client = anthropic.Anthropic(api_key=config.get("anthropic", "api_key", fallback=""))
 
-        self.custom_models = [model.strip() for model in config.get("custom_server", "models", fallback="").split(",") if model.strip()]
-        self.config = config
-        self.os_name = os_name
+        self.custom_servers = []
+        custom_server_count = 0
+        while config.has_section(f"custom_server_{custom_server_count}"):
+            base_url = config.get(f"custom_server_{custom_server_count}", "base_url", fallback="http://localhost:11434/v1/")
+            api_key = config.get(f"custom_server_{custom_server_count}", "api_key", fallback="ollama")
+            org_id = config.get(f"custom_server_{custom_server_count}", "organization", fallback="")
+            custom_models = [model.strip() for model in config.get(f"custom_server_{custom_server_count}", "models", fallback="").split(",") if model.strip()]
+            self.custom_servers.append(CustomServer(base_url, api_key, org_id, custom_models, on_config_changed=lambda *args: self.on_config_changed()))
+            custom_server_count += 1
+
+        # Add api configuration variables
+        self.apikey_var = tk.StringVar(value=self.openai_client.api_key)
+        self.orgid_var = tk.StringVar(value=self.openai_client.organization)
+        self.anthropic_apikey_var = tk.StringVar(value=self.anthropic_client.api_key)
+
+        self.apikey_var.trace("w", self.on_config_changed)
+        self.orgid_var.trace("w", self.on_config_changed)
+        self.anthropic_apikey_var.trace("w", self.on_config_changed)
 
         # Create the main_frame for holding the chat and other widgets
         self.main_frame = ttk.Frame(self.app, padding="10")
@@ -143,21 +170,6 @@ class ChatWindow:
         self.save_button = ttk.Button(self.configuration_frame, text="Save Chat", command=self.save_chat_history)
         self.save_button.grid(row=config_row, column=3, sticky="w")
 
-        # Add api configuration variables
-        self.apikey_var = tk.StringVar(value=self.openai_client.api_key)
-        self.orgid_var = tk.StringVar(value=self.openai_client.organization)
-        self.anthropic_apikey_var = tk.StringVar(value=self.anthropic_client.api_key)
-        self.custom_baseurl_var = tk.StringVar(value=self.custom_aclient.base_url)
-        self.custom_apikey_var = tk.StringVar(value=self.custom_aclient.api_key)
-        self.custom_models_var = tk.StringVar(value=", ".join(self.custom_models))
-
-        self.apikey_var.trace("w", self.on_config_changed)
-        self.orgid_var.trace("w", self.on_config_changed)
-        self.anthropic_apikey_var.trace("w", self.on_config_changed)
-        self.custom_baseurl_var.trace("w", self.on_config_changed)
-        self.custom_apikey_var.trace("w", self.on_config_changed)
-        self.custom_models_var.trace("w", self.on_config_changed)
-
         # Add image detail dropdown
         self.image_detail_var = tk.StringVar(value="low")
         self.image_detail_dropdown = ttk.OptionMenu(self.main_frame, self.image_detail_var, "low", "low", "high")
@@ -166,7 +178,7 @@ class ChatWindow:
         # Update image detail visibility based on selected model
         self.model_var.trace("w", self.update_image_detail_visibility)
         # Create the hamburger menu button and bind it to the show_popup function
-        self.hamburger_button = ttk.Button(self.configuration_frame, text="≡", command=self.show_settings_window)
+        self.hamburger_button = ttk.Button(self.configuration_frame, text="≡", command=self.toggle_settings_window)
         self.hamburger_button.grid(row=config_row, column=9, padx=10, pady=10, sticky="w")
 
         self.default_bg_color = self.get_default_bg_color(self.app)
@@ -203,7 +215,7 @@ class ChatWindow:
         self.inner_frame.bind("<Configure>", self.configure_scrollregion)
         self.app.bind("<Configure>", self.update_entry_widths)
         self.app.bind_class('Entry', '<FocusOut>', self.update_previous_focused_widget)
-        self.app.bind("<Escape>", lambda event: self.show_settings_window())
+        self.app.bind("<Escape>", lambda event: self.toggle_settings_window())
         # Bind Command-N to open new windows (Control-N on Windows/Linux)
         # modifier = 'Command' if sys.platform == 'darwin' else 'Control'
         modifier = 'Control'
@@ -289,7 +301,7 @@ class ChatWindow:
                 "content": file_naming_prompt
             }
         )
-        print("requesting file name using ", count_tokens(messages, FILE_NAMING_MODEL), "tokens and gpt-3.5-turbo model.")
+        print("requesting file name using ", count_tokens(messages, FILE_NAMING_MODEL), f"tokens and {FILE_NAMING_MODEL} model.")
         response = self.openai_client.chat.completions.create(model=FILE_NAMING_MODEL, messages=messages)
         # return the filename
         suggested_filename = response.choices[0].message.content.strip()
@@ -327,7 +339,14 @@ class ChatWindow:
 
     def stream_openai_model_output(self, messages):
         async def streaming_chat_completion():
-            streaming_client = self.openai_aclient if self.model_var.get() in OPENAI_MODELS else self.custom_aclient
+            if self.model_var.get() in OPENAI_MODELS:
+                streaming_client = self.openai_aclient
+            else:
+                streaming_client = next((server.client for server in self.custom_servers if self.model_var.get() in server.models), None)
+            if not streaming_client:
+                error_message = f"Model {self.model_var.get()} not found in custom servers."
+                self.show_error_popup(error_message)
+                return
             try:
                 response = streaming_client.chat.completions.create(model=self.model_var.get(),
                     messages=messages,
@@ -416,7 +435,10 @@ class ChatWindow:
 
     def update_models_dropdown(self):
         current_model = self.model_var.get()
-        possible_models = [*OPENAI_MODELS, *ANTHROPIC_MODELS, *self.custom_models]
+        anthropic_models = ANTHROPIC_MODELS if self.anthropic_apikey_var.get() else []
+        openai_models = OPENAI_MODELS if self.apikey_var.get() else []
+        custom_models = [model for server in self.custom_servers for model in server.models]
+        possible_models = [*openai_models, *anthropic_models, *custom_models]
         filtered_models = [model for model in possible_models if model != current_model]
         self.models_dropdown = ttk.OptionMenu(self.main_frame, self.model_var, current_model, current_model, *filtered_models).grid(row=0, column=7, sticky="nw")
 
@@ -626,6 +648,7 @@ class ChatWindow:
             json.dump(chat_data, f, indent=4)
 
         # Save the last used model
+        self.config.read("config.ini")
         self.config.set("app", "last_used_model", self.model_var.get())
         with open("config.ini", "w") as config_file:
             self.config.write(config_file)
@@ -648,7 +671,7 @@ class ChatWindow:
         if self.settings_window is not None:
             self.settings_window.focus_force()
         else:
-            self.show_settings_window()
+            self.toggle_settings_window()
         self.show_error_popup(message)
 
     def show_token_count_message(self):
@@ -697,15 +720,18 @@ class ChatWindow:
         if self.anthropic_apikey_var.get() != "":
             self.anthropic_client = anthropic.Anthropic(api_key=self.anthropic_apikey_var.get())
             self.config.set("anthropic", "api_key", self.anthropic_client.api_key)
-        if self.custom_baseurl_var.get() != "":
-            self.custom_aclient = AsyncOpenAI(base_url = self.config.get("custom_server", "base_url", fallback=""), api_key=self.config.get("custom_server", "api_key", fallback="ollama"),)
-            self.config.set("custom_server", "base_url", str(self.custom_aclient.base_url))
-            self.config.set("custom_server", "api_key", self.custom_aclient.api_key)
-        if self.custom_models_var.get() != "":
-            self.custom_models.clear()
-            self.custom_models.extend([model.strip() for model in self.custom_models_var.get().split(",") if model.strip()])
-            self.config.set("custom_server", "models", self.custom_models_var.get())
-            self.update_models_dropdown()
+        for i, custom_server in enumerate(self.custom_servers):
+            if not self.config.has_section(f"custom_server_{i}"):
+                self.config.add_section(f"custom_server_{i}")
+            if custom_server.baseurl_var.get() != "":
+                custom_server.client = AsyncOpenAI(base_url=custom_server.baseurl_var.get(), api_key=custom_server.apikey_var.get())
+                self.config.set(f"custom_server_{i}", "base_url", str(custom_server.client.base_url))
+                self.config.set(f"custom_server_{i}", "api_key", str(custom_server.client.api_key))
+            if custom_server.models_var.get() != "":
+                custom_server.models.clear()
+                custom_server.models.extend([model.strip() for model in custom_server.models_var.get().split(",") if model.strip()])
+                self.config.set(f"custom_server_{i}", "models", custom_server.models_var.get())
+        self.update_models_dropdown()
 
         with open("config.ini", "w") as config_file:
             self.config.write(config_file)
@@ -764,8 +790,23 @@ class ChatWindow:
         # Destroy the temporary button
         temp_button.destroy()
         return default_bg_color
+    
+    def add_new_custom_server(self):
+        new_custom_server = CustomServer("", "", "", [], on_config_changed=lambda *args: self.on_config_changed())
+        self.custom_servers.append(new_custom_server)
+        self.save_api_key()
+        self.toggle_settings_window()
+        self.toggle_settings_window()
+    def remove_last_custom_server(self):
+        if len(self.custom_servers) > 0:
+            self.config.remove_section(f"custom_server_{len(self.custom_servers)-1}")
+            self.config.write(open("config.ini", "w"))
+            self.custom_servers.pop()
+        self.save_api_key()
+        self.toggle_settings_window()
+        self.toggle_settings_window()
 
-    def show_settings_window(self):
+    def toggle_settings_window(self):
         # If the settings window already exists, close it and set our settings window to None
         if self.settings_window is not None:
             self.settings_window.destroy()
@@ -777,42 +818,53 @@ class ChatWindow:
         self.settings_frame = ttk.Frame(self.settings_window, padding="3")
         self.settings_frame.grid(row=0, column=0, sticky="new")
 
-        # Add API key / Org ID configurations
-        ttk.Label(self.settings_frame, text="OpenAI API Key:").grid(row=0, column=0, sticky="e")
-        apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.apikey_var, width=60)
-        apikey_entry.grid(row=0, column=1, sticky="e")
-
-        ttk.Label(self.settings_frame, text="OpenAI Org ID:").grid(row=1, column=0, sticky="e")
-        orgid_entry = ttk.Entry(self.settings_frame, textvariable=self.orgid_var, width=60)
-        orgid_entry.grid(row=1, column=1, sticky="e")
-
-        # Add Anthropic API key configuration
-        ttk.Label(self.settings_frame, text="Anthropic API Key:").grid(row=2, column=0, sticky="e")
-        anthropic_apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.anthropic_apikey_var, width=60)
-        anthropic_apikey_entry.grid(row=2, column=1, sticky="e")
-
-        # Add Custom Server configuration
-        ttk.Separator(self.settings_frame, orient='horizontal').grid(row=3, column=0, columnspan=2, sticky="we", pady=10)
-        ttk.Label(self.settings_frame, text="Custom Server Configuration").grid(row=4, column=0, sticky="e")
-        ttk.Label(self.settings_frame, text="Base URL:").grid(row=5, column=0, sticky="e")
-        custom_baseurl_entry = ttk.Entry(self.settings_frame, textvariable=self.custom_baseurl_var, width=60)
-        custom_baseurl_entry.grid(row=5, column=1, sticky="e")
-        ttk.Label(self.settings_frame, text="API Key:").grid(row=6, column=0, sticky="e")
-        custom_apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.custom_apikey_var, width=60)
-        custom_apikey_entry.grid(row=6, column=1, sticky="e")
-        ttk.Label(self.settings_frame, text="Models (comma-separated):").grid(row=7, column=0, sticky="e")
-        custom_models_entry = ttk.Entry(self.settings_frame, textvariable=self.custom_models_var, width=60)
-        custom_models_entry.grid(row=7, column=1, sticky="e")
-
         # Create a Checkbutton widget for dark mode toggle
-        ttk.Separator(self.settings_frame, orient='horizontal').grid(row=8, column=0, columnspan=2, sticky="we", pady=10)
         self.dark_mode_var.set(self.load_dark_mode_state())
         dark_mode_checkbutton = ttk.Checkbutton(self.settings_frame, text="Dark mode", variable=self.dark_mode_var, command=self.toggle_dark_mode)
-        dark_mode_checkbutton.grid(row=9, column=0, columnspan=2, padx=10, pady=10, sticky="w")
+        dark_mode_checkbutton.grid(row=0, column=0, columnspan=2, padx=10, pady=10, sticky="w")
+        self.toggle_dark_mode()
+
+        # Add API key / Org ID configurations
+        ttk.Label(self.settings_frame, text="OpenAI API Key:").grid(row=1, column=0, sticky="e")
+        apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.apikey_var, width=60)
+        apikey_entry.grid(row=1, column=1, sticky="e")
+
+        ttk.Label(self.settings_frame, text="OpenAI Org ID:").grid(row=2, column=0, sticky="e")
+        orgid_entry = ttk.Entry(self.settings_frame, textvariable=self.orgid_var, width=60)
+        orgid_entry.grid(row=2, column=1, sticky="e")
+
+        # Add Anthropic API key configuration
+        ttk.Label(self.settings_frame, text="Anthropic API Key:").grid(row=3, column=0, sticky="e")
+        anthropic_apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.anthropic_apikey_var, width=60)
+        anthropic_apikey_entry.grid(row=3, column=1, sticky="e")
+
+        # Add Custom Server configuration
+        cur_row = 4
+        for i, custom_server in enumerate(self.custom_servers):
+            ttk.Separator(self.settings_frame, orient='horizontal').grid(row=cur_row, column=0, columnspan=2, sticky="we", pady=10)
+            ttk.Label(self.settings_frame, text=f"Custom Server {i+1} Configuration").grid(row=cur_row+1, column=0, sticky="e")
+            ttk.Label(self.settings_frame, text="Base URL:").grid(row=cur_row+2, column=0, sticky="e")
+            custom_baseurl_entry = ttk.Entry(self.settings_frame, textvariable=custom_server.baseurl_var, width=60)
+            custom_baseurl_entry.grid(row=cur_row+2, column=1, sticky="e")
+            ttk.Label(self.settings_frame, text="API Key:").grid(row=cur_row+3, column=0, sticky="e")
+            custom_apikey_entry = ttk.Entry(self.settings_frame, textvariable=custom_server.apikey_var, width=60)
+            custom_apikey_entry.grid(row=cur_row+3, column=1, sticky="e")
+            ttk.Label(self.settings_frame, text="Models (comma-separated):").grid(row=cur_row+4, column=0, sticky="e")
+            custom_models_entry = ttk.Entry(self.settings_frame, textvariable=custom_server.models_var, width=60)
+            custom_models_entry.grid(row=cur_row+4, column=1, sticky="e")
+            cur_row += 5
+        
+        # add a button to remove the last custom server
+        remove_custom_server_button = ttk.Button(self.settings_frame, text="Remove Last Custom Server", command=self.remove_last_custom_server)
+        remove_custom_server_button.grid(row=cur_row+1, column=1, columnspan=1, sticky="e")
+        ttk.Separator(self.settings_frame, orient='horizontal').grid(row=cur_row+2, column=0, columnspan=2, sticky="we", pady=10)
+        # add a button to add a new custom server
+        add_custom_server_button = ttk.Button(self.settings_frame, text="Add Custom Server", command=self.add_new_custom_server)
+        add_custom_server_button.grid(row=cur_row+3, column=0, columnspan=1, sticky="w")
+
         # Add a button to close the popup
         close_button = ttk.Button(self.settings_frame, text="Close", command=self.close_settings_window)
         close_button.grid(row=100, column=0, columnspan=2, pady=10)
-        self.toggle_dark_mode()
         # Bind the on_popup_close function to the WM_DELETE_WINDOW protocol
         self.settings_window.protocol("WM_DELETE_WINDOW", self.on_settings_window_close)
         # Bind events for api/org clipboard prompts, only in Android

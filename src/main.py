@@ -10,7 +10,7 @@ if not os.path.exists(config_filename):
     with open(config_filename, "w") as f:
         f.write("[openai]\n")
         f.write("[anthropic]\n")
-        f.write("[custom_server]\n")
+        f.write("[custom_server_0]\n")
         f.write("[app]\n")
 config = configparser.ConfigParser()
 config.read(config_filename)
@@ -22,8 +22,8 @@ if not config.has_section("anthropic"):
     config.add_section("anthropic")
     with open(config_filename, "w") as f:
         config.write(f)
-if not config.has_section("custom_server"):
-    config.add_section("custom_server")
+if not config.has_section("custom_server_0"):
+    config.add_section("custom_server_0")
     with open(config_filename, "w") as f:
         config.write(f)
 if not config.has_section("app"):
