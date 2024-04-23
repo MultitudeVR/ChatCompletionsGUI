@@ -36,6 +36,7 @@ After installation, enter your OpenAI API key and Organization ID (if applicable
 ## Features
 
 - Interact with openai and anthropic models
+- Interact with locally run models (i.e. ollama)
 - Easily add, edit, and delete chat messages
 - Save and load chat logs in JSON format
 - Image analysis via vision API (currently supports web links only)

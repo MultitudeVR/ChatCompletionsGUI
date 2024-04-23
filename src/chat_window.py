@@ -1,7 +1,3 @@
-
-import openai
-
-from openai import OpenAI, AsyncOpenAI
 import tkinter as tk
 import os
 
@@ -22,8 +18,6 @@ from prompts import file_naming_prompt
 from utils import convert_messages_for_model, parse_and_create_image_messages, count_tokens, convert_text_to_tokens, convert_tokens_to_text
 from custom_server import CustomServer
 
-import anthropic
-
 class ChatWindow:
     def __init__(self, root, config, os_name):
         self.app = root
@@ -38,10 +32,8 @@ class ChatWindow:
         self.settings_window = None
         self.settings_frame = None
 
-        self.openai_client = OpenAI(api_key=config.get("openai", "api_key", fallback=""), organization=config.get("openai", "organization", fallback=""))
-        self.openai_aclient = AsyncOpenAI(api_key=config.get("openai", "api_key", fallback=""), organization=config.get("openai", "organization", fallback=""))
-        self.anthropic_client = anthropic.Anthropic(api_key=config.get("anthropic", "api_key", fallback=""))
-
+        self.setup_openai_client()
+        self.setup_anthropic_client()
         self.custom_servers = []
         custom_server_count = 0
         while config.has_section(f"custom_server_{custom_server_count}"):
@@ -51,15 +43,6 @@ class ChatWindow:
             custom_models = [model.strip() for model in config.get(f"custom_server_{custom_server_count}", "models", fallback="").split(",") if model.strip()]
             self.custom_servers.append(CustomServer(base_url, api_key, org_id, custom_models, on_config_changed=lambda *args: self.on_config_changed()))
             custom_server_count += 1
-
-        # Add api configuration variables
-        self.apikey_var = tk.StringVar(value=self.openai_client.api_key)
-        self.orgid_var = tk.StringVar(value=self.openai_client.organization)
-        self.anthropic_apikey_var = tk.StringVar(value=self.anthropic_client.api_key)
-
-        self.apikey_var.trace("w", self.on_config_changed)
-        self.orgid_var.trace("w", self.on_config_changed)
-        self.anthropic_apikey_var.trace("w", self.on_config_changed)
 
         # Create the main_frame for holding the chat and other widgets
         self.main_frame = ttk.Frame(self.app, padding="10")
@@ -217,6 +200,43 @@ class ChatWindow:
         # Start the application main loop
         self.app.mainloop()
 
+    def setup_openai_client(self):
+        self.openai_apikey_var = tk.StringVar(value=self.config.get("openai", "api_key", fallback=""))
+        self.openai_orgid_var = tk.StringVar(value=self.config.get("openai", "organization", fallback=""))
+        self.openai_apikey_var.trace("w", self.on_config_changed)
+        self.openai_orgid_var.trace("w", self.on_config_changed)
+        if self.openai_apikey_var.get():
+            try:
+                from openai import OpenAI, AsyncOpenAI
+            except:
+                error_message = "OpenAI API not installed. Please install the 'openai' package with the `pip install openai` command."
+                print(error_message)
+                # self.show_error_popup(error_message)
+                self.openai_aclient = None
+                self.openai_client = None
+                return
+            self.openai_client = OpenAI(api_key=self.openai_apikey_var.get(), organization=self.openai_orgid_var.get())
+            self.openai_aclient = AsyncOpenAI(api_key=self.openai_apikey_var.get(), organization=self.openai_orgid_var.get())
+        else:
+            self.openai_client = None
+            self.openai_aclient = None
+
+    def setup_anthropic_client(self):
+        self.anthropic_apikey_var = tk.StringVar(value=self.config.get("anthropic", "api_key", fallback=""))
+        self.anthropic_apikey_var.trace("w", self.on_config_changed)
+        if self.anthropic_apikey_var.get():
+            try:
+                import anthropic
+            except:
+                error_message = "Anthropic API not installed. Please install the 'anthropic' package with the `pip install anthropic` command."
+                # self.show_error_popup(error_message)
+                print(error_message)
+                self.anthropic_client = None
+                return
+            self.anthropic_client = anthropic.Anthropic(api_key=self.anthropic_apikey_var.get())
+        else:
+            self.anthropic_client = None
+    
     def clear_chat_history(self):
         for row in reversed(range(len(self.chat_history))):
             self.delete_message(row + 1)
@@ -271,7 +291,7 @@ class ChatWindow:
         return messages
 
     def request_file_name(self):
-        if not self.file_naming_model_var.get():
+        if not self.file_naming_model_var.get() or self.openai_client is None:
             return "chat_log.json"
         file_naming_model = self.file_naming_model_var.get()
         # add to messages a system message informing the AI to create a title
@@ -333,12 +353,18 @@ class ChatWindow:
         async def streaming_chat_completion():
             if self.model_var.get() in OPENAI_MODELS:
                 streaming_client = self.openai_aclient
+                if not streaming_client:
+                    self.show_error_popup("OpenAI API not installed. Please install the 'openai' package with the `pip install openai` command.")
+                    return
             else:
                 streaming_client = next((server.client for server in self.custom_servers if self.model_var.get() in server.models), None)
-            if not streaming_client:
-                error_message = f"Model {self.model_var.get()} not found in custom servers."
-                self.show_error_popup(error_message)
-                return
+                if len(self.custom_servers) > 0 and self.custom_servers[0].client is None:
+                    self.show_error_popup("OpenAI package not found, custom servers will be disabled! Install the OpenAI API with `pip install openai`")
+                    return
+                elif not streaming_client:
+                    error_message = f"Model {self.model_var.get()} not found in custom servers."
+                    self.show_error_popup(error_message)
+                    return
             try:
                 response = streaming_client.chat.completions.create(model=self.model_var.get(),
                     messages=messages,
@@ -359,15 +385,16 @@ class ChatWindow:
                         self.app.after(0, self.add_to_last_message, content)
                     if self.is_streaming_cancelled:
                         break
-            except openai.AuthenticationError as e:
+            except Exception as e:
                 if "Incorrect API key" in str(e):
                     error_message = "API key is incorrect, please configure it in the settings."
+                    loop.call_soon_threadsafe(self.show_error_and_open_settings, error_message)
                 elif "No such organization" in str(e):
                     error_message = "Organization not found, please configure it in the settings."
-                loop.call_soon_threadsafe(self.show_error_and_open_settings, error_message)
-            except Exception as e:
-                error_message = f"An unexpected error occurred: {e}"
-                loop.call_soon_threadsafe(self.show_error_popup, error_message)
+                    loop.call_soon_threadsafe(self.show_error_and_open_settings, error_message)
+                else:
+                    error_message = f"An unexpected error occurred: {e}"
+                    loop.call_soon_threadsafe(self.show_error_popup, error_message)
             finally:
                 response.close()
                 print("Closed response")
@@ -378,6 +405,14 @@ class ChatWindow:
         loop.run_until_complete(streaming_chat_completion())
 
     def stream_anthropic_model_output(self, messages, system_message):
+        if self.config.get("anthropic", "api_key", fallback="") == "":
+            error_message = "Anthropic API key is not configured. Please configure it in the settings."
+            self.show_error_and_open_settings(error_message)
+            return
+        if not self.anthropic_client:
+            error_message = "Anthropic API not installed. Please install the 'anthropic' package with the `pip install anthropic` command."
+            self.show_error_popup(error_message)
+            return
         async def streaming_anthropic_chat_completion():
             with self.anthropic_client.messages.stream(
                     model=self.model_var.get(),
@@ -427,8 +462,8 @@ class ChatWindow:
 
     def update_models_dropdown(self):
         current_model = self.model_var.get()
-        anthropic_models = ANTHROPIC_MODELS if self.anthropic_apikey_var.get() else []
-        openai_models = OPENAI_MODELS if self.apikey_var.get() else []
+        anthropic_models = ANTHROPIC_MODELS if self.anthropic_client and self.anthropic_apikey_var.get() else []
+        openai_models = OPENAI_MODELS if self.openai_client and self.openai_apikey_var.get() else []
         custom_models = [model for server in self.custom_servers for model in server.models]
         possible_models = [*openai_models, *anthropic_models, *custom_models]
         filtered_models = [model for model in possible_models if model != current_model]
@@ -704,24 +739,22 @@ class ChatWindow:
         self.save_api_key()
 
     def save_api_key(self):
-        if self.apikey_var.get() != "":
-            self.openai_client = OpenAI(api_key=self.apikey_var.get(), organization=self.orgid_var.get())
-            self.openai_aclient = AsyncOpenAI(api_key=self.apikey_var.get(), organization=self.orgid_var.get())
-            self.config.set("openai", "api_key", self.openai_client.api_key)
-            self.config.set("openai", "organization", self.openai_client.organization)
+        if self.openai_apikey_var.get() != "":
+            self.config.set("openai", "api_key", self.openai_apikey_var.get())
+            self.config.set("openai", "organization", self.openai_orgid_var.get())
+            self.setup_openai_client()
         if self.anthropic_apikey_var.get() != "":
-            self.anthropic_client = anthropic.Anthropic(api_key=self.anthropic_apikey_var.get())
-            self.config.set("anthropic", "api_key", self.anthropic_client.api_key)
+            self.config.set("anthropic", "api_key", self.anthropic_apikey_var.get())
+            self.setup_anthropic_client()
         for i, custom_server in enumerate(self.custom_servers):
             if not self.config.has_section(f"custom_server_{i}"):
                 self.config.add_section(f"custom_server_{i}")
             if custom_server.baseurl_var.get() != "":
-                custom_server.client = AsyncOpenAI(base_url=custom_server.baseurl_var.get(), api_key=custom_server.apikey_var.get())
+                custom_server.update_client()
                 self.config.set(f"custom_server_{i}", "base_url", str(custom_server.client.base_url))
                 self.config.set(f"custom_server_{i}", "api_key", str(custom_server.client.api_key))
             if custom_server.models_var.get() != "":
-                custom_server.models.clear()
-                custom_server.models.extend([model.strip() for model in custom_server.models_var.get().split(",") if model.strip()])
+                custom_server.update_models()
                 self.config.set(f"custom_server_{i}", "models", custom_server.models_var.get())
 
         self.config.set("app", "file_naming_model", self.file_naming_model_var.get())
@@ -820,11 +853,11 @@ class ChatWindow:
 
         # Add API key / Org ID configurations
         ttk.Label(self.settings_frame, text="OpenAI API Key:").grid(row=1, column=0, sticky="e")
-        apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.apikey_var, width=60)
+        apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.openai_apikey_var, width=60)
         apikey_entry.grid(row=1, column=1, sticky="e")
 
         ttk.Label(self.settings_frame, text="OpenAI Org ID:").grid(row=2, column=0, sticky="e")
-        orgid_entry = ttk.Entry(self.settings_frame, textvariable=self.orgid_var, width=60)
+        orgid_entry = ttk.Entry(self.settings_frame, textvariable=self.openai_orgid_var, width=60)
         orgid_entry.grid(row=2, column=1, sticky="e")
 
         # Add Anthropic API key configuration
