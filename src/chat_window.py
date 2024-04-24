@@ -12,8 +12,9 @@ import random
 import string
 import sys
 from tooltip import ToolTip
-from constants import OPENAI_VISION_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, SYSTEM_MESSAGE_DEFAULT_TEXT, \
-    DEFAULT_FILE_NAMING_MODEL, MODEL_INFO, HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE
+from constants import OPENAI_VISION_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS, \
+    SYSTEM_MESSAGE_DEFAULT_TEXT, DEFAULT_FILE_NAMING_MODEL, MODEL_INFO, \
+    HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE
 from prompts import file_naming_prompt
 from utils import convert_messages_for_model, parse_and_create_image_messages, count_tokens, convert_text_to_tokens, convert_tokens_to_text
 from custom_server import CustomServer
@@ -34,6 +35,7 @@ class ChatWindow:
 
         self.setup_openai_client()
         self.setup_anthropic_client()
+        self.setup_google_client()
         self.custom_servers = []
         custom_server_count = 0
         while config.has_section(f"custom_server_{custom_server_count}"):
@@ -210,7 +212,7 @@ class ChatWindow:
             try:
                 from openai import OpenAI, AsyncOpenAI
             except:
-                error_message = "OpenAI API not installed. Please install the 'openai' package with the `pip install openai` command."
+                error_message = "WARNING: OpenAI API not installed. If you wish to use OpenAI or custom server models, install the 'openai' package with the `pip install openai` command."
                 print(error_message)
                 # self.show_error_popup(error_message)
                 self.openai_aclient = None
@@ -230,7 +232,7 @@ class ChatWindow:
             try:
                 import anthropic
             except:
-                error_message = "Anthropic API not installed. Please install the 'anthropic' package with the `pip install anthropic` command."
+                error_message = "WARNING: Anthropic API not installed. If you wish to use Anthropic models, install the 'anthropic' package with the `pip install anthropic` command."
                 # self.show_error_popup(error_message)
                 print(error_message)
                 self.anthropic_client = None
@@ -238,6 +240,20 @@ class ChatWindow:
             self.anthropic_client = anthropic.Anthropic(api_key=self.anthropic_apikey_var.get())
         else:
             self.anthropic_client = None
+
+    def setup_google_client(self):
+        if not hasattr(self, "google_apikey_var"):
+            self.google_apikey_var = tk.StringVar(value=self.config.get("google", "api_key", fallback=""))
+            self.google_apikey_var.trace("w", self.on_config_changed)
+        if self.google_apikey_var.get():
+            try:
+                import google.generativeai as genai
+            except:
+                error_message = "WARNING: Google GenerativeAI API not installed. If you wish to use Google Gemini models, install the 'google-generativeai' package with the `pip install google-generativeai` command."
+                # self.show_error_popup(error_message)
+                print(error_message)
+                return
+            genai.configure(api_key=self.google_apikey_var.get())
     
     def clear_chat_history(self):
         for row in reversed(range(len(self.chat_history))):
@@ -345,6 +361,8 @@ class ChatWindow:
             model_name = self.model_var.get()
             if model_name in ANTHROPIC_MODELS:
                 self.stream_anthropic_model_output(messages, anthropic_system_message)
+            elif model_name in GOOGLE_MODELS:
+                self.stream_google_model_output(messages)
             else:
                 self.stream_openai_model_output(messages)
         self.is_streaming_cancelled = False
@@ -439,6 +457,43 @@ class ChatWindow:
         asyncio.set_event_loop(loop)
         loop.run_until_complete(streaming_anthropic_chat_completion())
 
+    def stream_google_model_output(self, messages):
+        if self.config.get("google", "api_key", fallback="") == "":
+            error_message = "Google API key is not configured. Please configure it in the settings."
+            self.show_error_and_open_settings(error_message)
+            return
+        try:
+            import google.generativeai as genai
+        except:
+            error_message = "Google GenerativeAI API not installed. If you wish to use Google Gemini models, install the 'google-generativeai' package with the `pip install google-generativeai` command."
+            self.show_error_popup(error_message)
+            return
+        async def streaming_google_chat_completion():
+            try:
+                google_model = genai.GenerativeModel(self.model_var.get(), 
+                                    generation_config={"temperature": self.temperature_var.get(), 
+                                                        "max_output_tokens": self.max_length_var.get()})
+                response = google_model.generate_content(messages, stream=True)
+            except Exception as e:
+                error_message = "Error: " + str(e)
+                self.show_error_popup(error_message)
+                return
+            try:
+                for chunk in response:
+                    self.app.after(0, self.add_to_last_message, chunk.parts[0].text)
+                    if self.is_streaming_cancelled:
+                        break
+            except Exception as e:
+                error_message = f"An unexpected error occurred: {e}"
+                loop.call_soon_threadsafe(self.show_error_popup, error_message)
+            finally:
+                response.resolve()
+            if not self.is_streaming_cancelled:
+                self.app.after(0, self.add_empty_user_message)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(streaming_google_chat_completion())
+
     def update_chat_file_dropdown(self, new_file_path):
         # Refresh the list of chat files from the directory
         self.chat_files = sorted(
@@ -465,10 +520,11 @@ class ChatWindow:
     def update_models_dropdown(self):
         # Update the model dropdown menu with available models
         current_model = self.model_var.get()
-        anthropic_models = ANTHROPIC_MODELS if self.anthropic_client and self.anthropic_apikey_var.get() else []
-        openai_models = OPENAI_MODELS if self.openai_client and self.openai_apikey_var.get() else []
+        anthropic_models = ANTHROPIC_MODELS if "anthropic" in sys.modules and self.anthropic_apikey_var.get() else []
+        google_models = GOOGLE_MODELS if "google.generativeai" in sys.modules and self.google_apikey_var.get() else []
+        openai_models = OPENAI_MODELS if "openai" in sys.modules and self.openai_apikey_var.get() else []
         custom_models = [model for server in self.custom_servers for model in server.models]
-        possible_models = [*openai_models, *anthropic_models, *custom_models]
+        possible_models = [*openai_models, *anthropic_models, *google_models, *custom_models]
         ttk.OptionMenu(self.main_frame, self.model_var, current_model, *possible_models).grid(row=0, column=7, sticky="nw")
         # add separators to the dropdown menu
         dropdown_menu = self.main_frame.winfo_children()[len(self.main_frame.children)-1]['menu']
@@ -478,6 +534,9 @@ class ChatWindow:
             dropdown_menu.insert_separator(sep)
         if anthropic_models:
             sep+=len(anthropic_models)+1
+            dropdown_menu.insert_separator(sep)
+        if google_models:
+            sep+=len(google_models)+1
             dropdown_menu.insert_separator(sep)
         for server in self.custom_servers:
             sep += len(server.models)+1
@@ -760,6 +819,9 @@ class ChatWindow:
         if self.anthropic_apikey_var.get() != "":
             self.config.set("anthropic", "api_key", self.anthropic_apikey_var.get())
             self.setup_anthropic_client()
+        if self.google_apikey_var.get() != "":
+            self.config.set("google", "api_key", self.google_apikey_var.get())
+            self.setup_google_client()
         for i, custom_server in enumerate(self.custom_servers):
             if not self.config.has_section(f"custom_server_{i}"):
                 self.config.add_section(f"custom_server_{i}")
@@ -878,14 +940,18 @@ class ChatWindow:
         ttk.Label(self.settings_frame, text="Anthropic API Key:").grid(row=3, column=0, sticky="e")
         anthropic_apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.anthropic_apikey_var, width=60)
         anthropic_apikey_entry.grid(row=3, column=1, sticky="e")
+        # Add Google API key configuration
+        ttk.Label(self.settings_frame, text="Google API Key:").grid(row=4, column=0, sticky="e")
+        google_apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.google_apikey_var, width=60)
+        google_apikey_entry.grid(row=4, column=1, sticky="e")
 
         # Add file naming model configuration
-        ttk.Label(self.settings_frame, text="File Naming Model (OpenAI only):").grid(row=4, column=0, sticky="e")
+        ttk.Label(self.settings_frame, text="File Naming Model (OpenAI only):").grid(row=5, column=0, sticky="e")
         file_naming_model_entry = ttk.Entry(self.settings_frame, textvariable=self.file_naming_model_var, width=60)
-        file_naming_model_entry.grid(row=4, column=1, sticky="e")
+        file_naming_model_entry.grid(row=5, column=1, sticky="e")
 
         # Add Custom Server configuration
-        cur_row = 5
+        cur_row = 6
         for i, custom_server in enumerate(self.custom_servers):
             ttk.Separator(self.settings_frame, orient='horizontal').grid(row=cur_row, column=0, columnspan=2, sticky="we", pady=10)
             ttk.Label(self.settings_frame, text=f"Custom Server {i+1} Configuration").grid(row=cur_row+1, column=0, sticky="e")

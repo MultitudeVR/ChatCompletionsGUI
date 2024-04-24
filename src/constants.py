@@ -26,6 +26,11 @@ ANTHROPIC_MODELS = [
     "claude-2.0", 
     "claude-instant-1.2"
 ]
+GOOGLE_MODELS = [
+    "gemini-1.5-pro-latest",
+    "gemini-pro",
+    # "gemini-pro-vision", # TODO: Add support for gemini vision models
+]
 OPENAI_VISION_MODELS = [
     'gpt-4-vision-preview', 
     'gpt-4-1106-vision-preview', 

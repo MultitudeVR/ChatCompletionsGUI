@@ -1,4 +1,4 @@
-from constants import OPENAI_VISION_MODELS, ANTHROPIC_MODELS
+from constants import OPENAI_VISION_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS
 import re
 import requests
 import tiktoken
@@ -103,4 +103,23 @@ def convert_messages_for_model(model, messages, image_detail="low"):
         if anthropic_messages[-1]["role"] == "assistant":
             anthropic_messages.append({"role": "user", "content": "<no message>"})
         return anthropic_messages, system_content
+    elif model in GOOGLE_MODELS:
+        # Google API also has a bunch of extra requirements not present in OpenAI's API
+        roles_mapping = {"user": "user", "assistant": "model", "system": "model"}
+        google_messages = []
+        for message in messages:
+            if not message["content"]:
+                continue
+            if message["role"] == "system":
+                google_messages.append({"role": "model", "parts": ["SYSTEM_PROMPT: " + message["content"]]})
+            else:
+                google_messages.append({"role": roles_mapping[message["role"]], "parts": [message["content"]]})
+        if len(google_messages) == 0 or google_messages[0]["role"] == "model":
+            google_messages.insert(0, {"role": "user", "parts": ["<no message>"]})
+        for i in range(len(google_messages) - 1, 0, -1):
+            if google_messages[i]["role"] == google_messages[i - 1]["role"]:
+                google_messages.insert(i, {"role": "user" if google_messages[i]["role"] == "model" else "model", "parts": ["<no message>"]})
+        if google_messages[-1]["role"] == "model":
+            google_messages.append({"role": "user", "parts": ["<no message>"]})
+        return google_messages, None
     return messages, None
