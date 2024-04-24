@@ -469,20 +469,18 @@ class ChatWindow:
         openai_models = OPENAI_MODELS if self.openai_client and self.openai_apikey_var.get() else []
         custom_models = [model for server in self.custom_servers for model in server.models]
         possible_models = [*openai_models, *anthropic_models, *custom_models]
-        filtered_models = [model for model in possible_models if model != current_model]
-        ttk.OptionMenu(self.main_frame, self.model_var, current_model, current_model, *filtered_models).grid(row=0, column=7, sticky="nw")
+        ttk.OptionMenu(self.main_frame, self.model_var, current_model, *possible_models).grid(row=0, column=7, sticky="nw")
         # add separators to the dropdown menu
         dropdown_menu = self.main_frame.winfo_children()[len(self.main_frame.children)-1]['menu']
-        sep = 1
-        dropdown_menu.insert_separator(sep)
+        sep = -1
         if openai_models:
-            sep+=len(openai_models)+(0 if current_model in openai_models else 1)
+            sep+=len(openai_models)+1
             dropdown_menu.insert_separator(sep)
         if anthropic_models:
-            sep+=len(anthropic_models)+(0 if current_model in anthropic_models else 1)
+            sep+=len(anthropic_models)+1
             dropdown_menu.insert_separator(sep)
         for server in self.custom_servers:
-            sep += len(server.models)+(0 if current_model in server.models else 1)
+            sep += len(server.models)+1
             dropdown_menu.insert_separator(sep)
 
     def load_chat_history(self):
