@@ -201,10 +201,11 @@ class ChatWindow:
         self.app.mainloop()
 
     def setup_openai_client(self):
-        self.openai_apikey_var = tk.StringVar(value=self.config.get("openai", "api_key", fallback=""))
-        self.openai_orgid_var = tk.StringVar(value=self.config.get("openai", "organization", fallback=""))
-        self.openai_apikey_var.trace("w", self.on_config_changed)
-        self.openai_orgid_var.trace("w", self.on_config_changed)
+        if not hasattr(self, "openai_apikey_var"):
+            self.openai_apikey_var = tk.StringVar(value=self.config.get("openai", "api_key", fallback=""))
+            self.openai_orgid_var = tk.StringVar(value=self.config.get("openai", "organization", fallback=""))
+            self.openai_apikey_var.trace("w", self.on_config_changed)
+            self.openai_orgid_var.trace("w", self.on_config_changed)
         if self.openai_apikey_var.get():
             try:
                 from openai import OpenAI, AsyncOpenAI
@@ -222,8 +223,9 @@ class ChatWindow:
             self.openai_aclient = None
 
     def setup_anthropic_client(self):
-        self.anthropic_apikey_var = tk.StringVar(value=self.config.get("anthropic", "api_key", fallback=""))
-        self.anthropic_apikey_var.trace("w", self.on_config_changed)
+        if not hasattr(self, "anthropic_apikey_var"):
+            self.anthropic_apikey_var = tk.StringVar(value=self.config.get("anthropic", "api_key", fallback=""))
+            self.anthropic_apikey_var.trace("w", self.on_config_changed)
         if self.anthropic_apikey_var.get():
             try:
                 import anthropic
@@ -867,12 +869,12 @@ class ChatWindow:
 
         # Add API key / Org ID configurations
         ttk.Label(self.settings_frame, text="OpenAI API Key:").grid(row=1, column=0, sticky="e")
-        apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.openai_apikey_var, width=60)
-        apikey_entry.grid(row=1, column=1, sticky="e")
+        openai_apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.openai_apikey_var, width=60)
+        openai_apikey_entry.grid(row=1, column=1, sticky="e")
 
         ttk.Label(self.settings_frame, text="OpenAI Org ID:").grid(row=2, column=0, sticky="e")
-        orgid_entry = ttk.Entry(self.settings_frame, textvariable=self.openai_orgid_var, width=60)
-        orgid_entry.grid(row=2, column=1, sticky="e")
+        openai_orgid_entry = ttk.Entry(self.settings_frame, textvariable=self.openai_orgid_var, width=60)
+        openai_orgid_entry.grid(row=2, column=1, sticky="e")
 
         # Add Anthropic API key configuration
         ttk.Label(self.settings_frame, text="Anthropic API Key:").grid(row=3, column=0, sticky="e")
@@ -915,10 +917,10 @@ class ChatWindow:
         self.settings_window.protocol("WM_DELETE_WINDOW", self.on_settings_window_close)
         # Bind events for api/org clipboard prompts, only in Android
         if(self.os_name == 'Android'):
-            apikey_entry.bind("<Button-1>", lambda event, entry=apikey_entry: self.prompt_paste_from_clipboard(event, entry))
-            orgid_entry.bind("<Button-1>", lambda event, entry=orgid_entry: self.prompt_paste_from_clipboard(event, entry))
-            apikey_entry.bind("<FocusOut>", self.update_previous_focused_widget)
-            orgid_entry.bind("<FocusOut>", self.update_previous_focused_widget)
+            openai_apikey_entry.bind("<Button-1>", lambda event, entry=openai_apikey_entry: self.prompt_paste_from_clipboard(event, entry))
+            openai_orgid_entry.bind("<Button-1>", lambda event, entry=openai_orgid_entry: self.prompt_paste_from_clipboard(event, entry))
+            openai_apikey_entry.bind("<FocusOut>", self.update_previous_focused_widget)
+            openai_orgid_entry.bind("<FocusOut>", self.update_previous_focused_widget)
 
         # Center the popup over the main window
         self.center_popup_over_chat_window(self.settings_window, self.app)
