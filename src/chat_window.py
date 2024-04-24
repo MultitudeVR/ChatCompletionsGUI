@@ -461,13 +461,27 @@ class ChatWindow:
             menu.add_command(label=file, command=lambda value=file: self.chat_filename_var.set(value))
 
     def update_models_dropdown(self):
+        # Update the model dropdown menu with available models
         current_model = self.model_var.get()
         anthropic_models = ANTHROPIC_MODELS if self.anthropic_client and self.anthropic_apikey_var.get() else []
         openai_models = OPENAI_MODELS if self.openai_client and self.openai_apikey_var.get() else []
         custom_models = [model for server in self.custom_servers for model in server.models]
         possible_models = [*openai_models, *anthropic_models, *custom_models]
         filtered_models = [model for model in possible_models if model != current_model]
-        self.models_dropdown = ttk.OptionMenu(self.main_frame, self.model_var, current_model, current_model, *filtered_models).grid(row=0, column=7, sticky="nw")
+        ttk.OptionMenu(self.main_frame, self.model_var, current_model, current_model, *filtered_models).grid(row=0, column=7, sticky="nw")
+        # add separators to the dropdown menu
+        dropdown_menu = self.main_frame.winfo_children()[len(self.main_frame.children)-1]['menu']
+        sep = 1
+        dropdown_menu.insert_separator(sep)
+        if openai_models:
+            sep+=len(openai_models)+(0 if current_model in openai_models else 1)
+            dropdown_menu.insert_separator(sep)
+        if anthropic_models:
+            sep+=len(anthropic_models)+(0 if current_model in anthropic_models else 1)
+            dropdown_menu.insert_separator(sep)
+        for server in self.custom_servers:
+            sep += len(server.models)+(0 if current_model in server.models else 1)
+            dropdown_menu.insert_separator(sep)
 
     def load_chat_history(self):
         filename = self.chat_filename_var.get()
@@ -751,8 +765,8 @@ class ChatWindow:
                 self.config.add_section(f"custom_server_{i}")
             if custom_server.baseurl_var.get() != "":
                 custom_server.update_client()
-                self.config.set(f"custom_server_{i}", "base_url", str(custom_server.client.base_url))
-                self.config.set(f"custom_server_{i}", "api_key", str(custom_server.client.api_key))
+                self.config.set(f"custom_server_{i}", "base_url", str(custom_server.baseurl_var.get()))
+                self.config.set(f"custom_server_{i}", "api_key", str(custom_server.apikey_var.get()))
             if custom_server.models_var.get() != "":
                 custom_server.update_models()
                 self.config.set(f"custom_server_{i}", "models", custom_server.models_var.get())
