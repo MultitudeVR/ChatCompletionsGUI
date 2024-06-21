@@ -2,6 +2,7 @@
 SYSTEM_MESSAGE_DEFAULT_TEXT = ""
 DEFAULT_FILE_NAMING_MODEL="gpt-3.5-turbo" # if empty, won't name files automatically
 OPENAI_MODELS = [
+    "gpt-4o",
     "gpt-3.5-turbo",
     "gpt-4-turbo",
     "gpt-4",
@@ -19,6 +20,7 @@ OPENAI_MODELS = [
     "gpt-3.5-turbo-16k-0613",
 ]
 ANTHROPIC_MODELS = [
+    "claude-3-5-sonnet-20240620",
     "claude-3-opus-20240229", 
     "claude-3-sonnet-20240229", 
     "claude-3-haiku-20240307", 
@@ -34,10 +36,12 @@ GOOGLE_MODELS = [
 OPENAI_VISION_MODELS = [
     'gpt-4-vision-preview', 
     'gpt-4-1106-vision-preview', 
+    'gpt-4o',
     'gpt-4-turbo', 
     'gpt-4-turbo-2024-04-09',
 ]
 MODEL_INFO = {
+    "gpt-4o": {"max_tokens": 128000, "input_price": 0.005, "output_price": 0.015},
     "gpt-4-turbo": {"max_tokens": 128000, "input_price": 0.01, "output_price": 0.03},
     "gpt-4-turbo-2024-04-09": {"max_tokens": 128000, "input_price": 0.01, "output_price": 0.03},
     "gpt-4-0125-preview": {"max_tokens": 128000, "input_price": 0.01, "output_price": 0.03},
@@ -56,6 +60,7 @@ MODEL_INFO = {
     "gpt-3.5-turbo-16k-0613": {"max_tokens": 16385, "input_price": 0.0010, "output_price": 0.0020},
     "gpt-3.5-turbo-1106": {"max_tokens": 16385, "input_price": 0.0010, "output_price": 0.0020},
     "gpt-3.5-turbo-instruct": {"max_tokens": 4096, "input_price": 0.0015, "output_price": 0.0020},
+    "claude-3-5-sonnet-20240620": {"max_tokens": 128000, "input_price": 0.003, "output_price": 0.015},
     "claude-3-opus-20240229": {"max_tokens": 128000, "input_price": 0.015, "output_price": 0.075},
     "claude-3-sonnet-20240229": {"max_tokens": 128000, "input_price": 0.003, "output_price": 0.015},
     "claude-3-haiku-20240307": {"max_tokens": 128000, "input_price": 0.00025, "output_price": 0.00125},

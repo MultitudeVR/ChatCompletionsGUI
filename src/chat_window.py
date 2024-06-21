@@ -799,10 +799,10 @@ class ChatWindow:
             # Calculate vision cost if the model is vision preview
             vision_cost = 0
             if self.image_detail_var.get() == "low":
-                vision_cost = LOW_DETAIL_COST_PER_IMAGE * num_images
+                vision_cost = LOW_DETAIL_COST_PER_IMAGE * num_images * (0.5 if model == 'gpt-4o' else 1)
             else:
                 # Estimated cost for high detail images
-                vision_cost = HIGH_DETAIL_COST_PER_IMAGE * num_images
+                vision_cost = HIGH_DETAIL_COST_PER_IMAGE * num_images * (0.5 if model == 'gpt-4o' else 1)
             total_cost = vision_cost
             cost_message += f"\nVision Cost: ${total_cost:.5f} for {num_images} images"
 
