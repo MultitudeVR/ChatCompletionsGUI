@@ -63,7 +63,8 @@ class ChatWindow:
         self.update_models_dropdown()
 
         # Add sliders for temperature, max length, and top p
-        self.temperature_var = tk.DoubleVar(value=0.7)
+        last_used_temperature = self.config.get("app", "last_used_temperature", fallback="0.7")
+        self.temperature_var = tk.DoubleVar(value=last_used_temperature)
         ttk.Label(self.main_frame, text="Temperature:").grid(row=0, column=6, sticky="e")
         self.temperature_scale = ttk.Scale(self.main_frame, variable=self.temperature_var, from_=0, to=1, orient="horizontal")
         self.temperature_scale.grid(row=0, column=7, sticky="w")
@@ -750,6 +751,7 @@ class ChatWindow:
         # Save the last used model
         self.config.read("config.ini")
         self.config.set("app", "last_used_model", self.model_var.get())
+        self.config.set("app", "last_used_temperature", str(self.temperature_var.get()))
         with open("config.ini", "w") as config_file:
             self.config.write(config_file)
 
