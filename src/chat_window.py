@@ -11,6 +11,7 @@ from datetime import datetime
 import random
 import string
 import sys
+import re
 from tooltip import ToolTip
 from constants import OPENAI_VISION_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS, \
     SYSTEM_MESSAGE_DEFAULT_TEXT, DEFAULT_FILE_NAMING_MODEL, MODEL_INFO, \
@@ -639,8 +640,11 @@ class ChatWindow:
         self.add_button_row += 1
         self.align_add_button()
 
+        message["save_button"] = ttk.Button(self.inner_frame, text="s", width=2, command=lambda: self.save_scripts(message["content_widget"]))
+        message["save_button"].grid(row=row, column=2, sticky="ne")
+
         message["delete_button"] = ttk.Button(self.inner_frame, text="-", width=3, command=lambda: self.delete_message(row))
-        message["delete_button"].grid(row=row, column=2, sticky="ne")
+        message["delete_button"].grid(row=row, column=3, sticky="ne")
 
         self.chat_frame.yview_moveto(1.5)
 
@@ -665,6 +669,58 @@ class ChatWindow:
         self.add_button_row -= 1
         self.align_add_button()
         self.cancel_streaming()
+
+    def save_scripts(self, content_widget):
+        content = content_widget.get("1.0", tk.END).strip()
+        # Updated to use regex for splitting
+        parts = re.split(r'(?<=\n)```(\w*)\n(.*?)\n```(?=\n|$)', content, flags=re.DOTALL)
+        extension_mapping = {
+            "python": "*.py",
+            "json": "*.json",
+            "csharp": "*.cs",
+            "html": "*.html",
+            "javascript": "*.js",
+            "typescript": "*.ts",
+            "css": "*.css",
+            "markdown": "*.md",
+            "yaml": "*.yaml",
+            "xml": "*.xml",
+            "java": "*.java",
+            "ruby": "*.rb",
+            "php": "*.php",
+            "shell": "*.sh",
+            "batch": "*.bat",
+            "ini": "*.ini",
+            "toml": "*.toml",
+            "rust": "*.rs",
+            "kotlin": "*.kt",
+            "swift": "*.swift",
+            "sql": "*.sql",
+            "perl": "*.pl",
+            "lua": "*.lua",
+            "r": "*.r",
+            "go": "*.go",
+        }
+        if len(parts) < 3:
+            messagebox.showinfo("Saving Script", "No script found in message. To make use of this feature, message must contain a script enclosed in triple-backticks.")
+        for i in range(1, len(parts), 3):
+            language = parts[i] or "Text"
+            extension = extension_mapping.get(language.lower(), "*.txt")
+            content_part = parts[i+1]
+            if content_part.strip():  # Only process non-empty parts
+                lines = content_part.strip().replace('\r\n', '\n').replace('\r', '\n').split('\n')
+                if len(lines) > 30:
+                    messagebox.showinfo("Saving Script", '\n'.join(lines[:30]) + "\n\n...")
+                else:
+                    messagebox.showinfo("Saving Script", content_part.strip())
+                file_path = filedialog.asksaveasfilename(
+                    defaultextension=extension,
+                    filetypes=[(f"{language.capitalize()} Files", extension), ("All Files", "*.*")],
+                    title=f"Save Script Part {(i//3)+1}"
+                )
+                if file_path:
+                    with open(file_path, "w", encoding='utf-8') as f:
+                        f.write(content_part.strip())
 
     def toggle_role(self, message):
         current_role = message["role"].get()
