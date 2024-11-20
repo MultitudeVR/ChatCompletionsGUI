@@ -1,4 +1,4 @@
-from constants import OPENAI_VISION_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS
+from constants import OPENAI_VISION_MODELS, OPENAI_REASONING_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS
 import re
 import requests
 import tiktoken
@@ -74,7 +74,19 @@ def parse_and_create_image_messages(content, image_detail):
     return {"role": "user", "content": messages}
 
 def convert_messages_for_model(model, messages, image_detail="low"):
-    if model in OPENAI_VISION_MODELS:
+    if model in OPENAI_REASONING_MODELS:
+        # Update the messages to not include the system role (unsupported in OpenAI's reasoning models)
+        new_messages = []
+        for message in messages:
+            if message["role"] == "system":
+                # Check for image URLs and create a single message with a 'content' array
+                message["role"] = "user"
+                new_messages.append(message)
+            else:
+                # User or assistant messages are added unchanged
+                new_messages.append(message)
+        return new_messages, None
+    elif model in OPENAI_VISION_MODELS:
         # Update the messages to include image data if any image URLs are found in the user's input
         new_messages = []
         for message in messages:

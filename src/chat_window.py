@@ -13,7 +13,7 @@ import string
 import sys
 import re
 from tooltip import ToolTip
-from constants import OPENAI_VISION_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS, \
+from constants import OPENAI_VISION_MODELS, OPENAI_REASONING_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS, \
     SYSTEM_MESSAGE_DEFAULT_TEXT, DEFAULT_FILE_NAMING_MODEL, MODEL_INFO, \
     HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE
 from prompts import file_naming_prompt
@@ -388,14 +388,17 @@ class ChatWindow:
                     self.show_error_popup(error_message)
                     return
             try:
-                response = streaming_client.chat.completions.create(model=self.model_var.get(),
-                    messages=messages,
-                    temperature=self.temperature_var.get(),
-                    max_tokens=self.max_length_var.get(),
-                    # top_p=1,
-                    # frequency_penalty=0,
-                    # presence_penalty=0,
-                    stream=True)
+                if self.model_var.get() in OPENAI_REASONING_MODELS:
+                    response = streaming_client.chat.completions.create(model=self.model_var.get(),
+                        messages=messages,
+                        temperature=1,
+                        stream=True)
+                else:
+                    response = streaming_client.chat.completions.create(model=self.model_var.get(),
+                        messages=messages,
+                        temperature=self.temperature_var.get(),
+                        max_tokens=self.max_length_var.get(),
+                        stream=True)
             except Exception as e:
                 error_message = f"An error occurred: {e}"
                 loop.call_soon_threadsafe(self.show_error_popup, error_message)
