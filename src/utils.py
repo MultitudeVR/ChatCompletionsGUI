@@ -109,11 +109,11 @@ def convert_messages_for_model(model, messages, image_detail="low"):
                 anthropic_messages.append({"role": message["role"], "content": message["content"]})
         if len(anthropic_messages) == 0 or anthropic_messages[0]["role"] == "assistant":
             anthropic_messages.insert(0, {"role": "user", "content": "<no message>"})
-        for i in range(len(anthropic_messages) - 1, 0, -1):
-            if anthropic_messages[i]["role"] == anthropic_messages[i - 1]["role"]:
-                anthropic_messages.insert(i, {"role": "user" if anthropic_messages[i]["role"] == "assistant" else "assistant", "content": "<no message>"})
-        if anthropic_messages[-1]["role"] == "assistant":
-            anthropic_messages.append({"role": "user", "content": "<no message>"})
+        # for i in range(len(anthropic_messages) - 1, 0, -1):
+        #     if anthropic_messages[i]["role"] == anthropic_messages[i - 1]["role"]:
+        #         anthropic_messages.insert(i, {"role": "user" if anthropic_messages[i]["role"] == "assistant" else "assistant", "content": "<no message>"})
+        # if anthropic_messages[-1]["role"] == "assistant":
+        #     anthropic_messages.append({"role": "user", "content": "<no message>"})
         return anthropic_messages, system_content
     elif model in GOOGLE_MODELS:
         # Google API also has a bunch of extra requirements not present in OpenAI's API
