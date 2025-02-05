@@ -9,6 +9,7 @@ OPENAI_MODELS = [
     "gpt-4-turbo",
     "o1-mini",
     "o1-preview",
+    "o3-mini",
     "gpt-4",
     "gpt-4-32k",
     "gpt-4-turbo-preview",
@@ -57,6 +58,7 @@ OPENAI_VISION_MODELS = [
 OPENAI_REASONING_MODELS = [
     'o1-mini', 
     'o1-preview',
+    'o3-mini',
     'o1-mini-2024-09-12',
     'o1-preview-2024-09-12',
 ]
