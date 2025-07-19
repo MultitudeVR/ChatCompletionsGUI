@@ -2,6 +2,7 @@
 SYSTEM_MESSAGE_DEFAULT_TEXT = ""
 DEFAULT_FILE_NAMING_MODEL="gpt-4o-mini" # if empty, won't name files automatically
 OPENAI_MODELS = [
+    "gpt-4.1",
     "gpt-4o",
     "gpt-4o-mini",
     "chatgpt-4o-latest",
@@ -44,6 +45,7 @@ GOOGLE_MODELS = [
     # "gemini-pro-vision", # TODO: Add support for gemini vision models
 ]
 OPENAI_VISION_MODELS = [
+    'gpt-4.1',
     'gpt-4-vision-preview', 
     'gpt-4-1106-vision-preview', 
     'gpt-4o',

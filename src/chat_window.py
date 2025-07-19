@@ -58,7 +58,7 @@ class ChatWindow:
         self.system_message_widget.grid(row=0, column=1, sticky="we", pady=3)
         self.system_message_widget.insert(tk.END, system_message.get())
 
-        last_used_model = self.config.get("app", "last_used_model", fallback="gpt-4-turbo")
+        last_used_model = self.config.get("app", "last_used_model", fallback="gpt-4.1")
         self.model_var = tk.StringVar(value=last_used_model)
         ttk.Label(self.main_frame, text="Model:").grid(row=0, column=6, sticky="ne")
         self.update_models_dropdown()
