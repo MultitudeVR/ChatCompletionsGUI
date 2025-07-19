@@ -57,6 +57,7 @@ class ChatWindow:
         self.system_message_widget = tk.Text(self.main_frame, wrap=tk.WORD, height=5, width=50, undo=True)
         self.system_message_widget.grid(row=0, column=1, sticky="we", pady=3)
         self.system_message_widget.insert(tk.END, system_message.get())
+        self.system_message_widget.bind("<<Paste>>", lambda event: self.handle_paste(event))
 
         last_used_model = self.config.get("app", "last_used_model", fallback="gpt-4.1")
         self.model_var = tk.StringVar(value=last_used_model)
@@ -638,6 +639,7 @@ class ChatWindow:
         message["content_widget"].grid(row=row, column=1, sticky="we")
         message["content_widget"].insert(tk.END, content)
         message["content_widget"].bind("<KeyRelease>", lambda event, content_widget=message["content_widget"]: self.update_content_height(event, content_widget))
+        message["content_widget"].bind("<<Paste>>", lambda event: self.handle_paste(event))
         self.update_content_height(None, message["content_widget"])
 
         self.add_button_row += 1
@@ -1088,6 +1090,31 @@ class ChatWindow:
 
     def update_previous_focused_widget(self, event):
         self.previous_focused_widget = event.widget
+    
+    def handle_paste(self, event):
+        """Handle paste events to replace selected text instead of inserting after it"""
+        widget = event.widget
+        try:
+            # Get clipboard content
+            clipboard_content = self.app.clipboard_get()
+            
+            # Check if there's a selection
+            if widget.tag_ranges("sel"):
+                # Delete the selected text
+                widget.delete("sel.first", "sel.last")
+            
+            # Insert clipboard content at current position
+            widget.insert("insert", clipboard_content)
+            
+            # Trigger height update for content widgets
+            if hasattr(widget, '_name') and widget in [msg["content_widget"] for msg in self.chat_history if "content_widget" in msg]:
+                self.update_content_height(None, widget)
+            
+            # Prevent default paste behavior
+            return "break"
+        except tk.TclError:
+            # No clipboard content or other error
+            return None
 
     def create_new_window(self, event):
         # Handle key press event
