@@ -86,7 +86,7 @@ def convert_messages_for_model(model, messages, image_detail="low"):
                 # User or assistant messages are added unchanged
                 new_messages.append(message)
         return new_messages, None
-    elif model in OPENAI_VISION_MODELS:
+    elif model in OPENAI_VISION_MODELS and image_detail != "none":
         # Update the messages to include image data if any image URLs are found in the user's input
         new_messages = []
         for message in messages:

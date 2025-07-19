@@ -149,7 +149,7 @@ class ChatWindow:
 
         # Add image detail dropdown
         self.image_detail_var = tk.StringVar(value="low")
-        self.image_detail_dropdown = ttk.OptionMenu(self.main_frame, self.image_detail_var, "low", "low", "high")
+        self.image_detail_dropdown = ttk.OptionMenu(self.main_frame, self.image_detail_var, "low", "none", "low", "high")
         self.update_image_detail_visibility()
 
         # Update image detail visibility based on selected model
@@ -848,7 +848,7 @@ class ChatWindow:
         total_cost = input_cost + output_cost
         cost_message = f"Input Cost: ${input_cost:.5f}\nOutput Cost: ${output_cost:.5f}"
 
-        if model in OPENAI_VISION_MODELS:
+        if model in OPENAI_VISION_MODELS and self.image_detail_var.get() != "none":
             # Count the number of images in the messages
             num_images = 0
             parsed_messages = [parse_and_create_image_messages(message.get("content",""), self.image_detail_var.get()) for message in messages]
