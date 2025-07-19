@@ -12,6 +12,11 @@ import random
 import string
 import sys
 import re
+import shutil
+import base64
+from io import BytesIO
+import mimetypes
+from PIL import Image
 from tooltip import ToolTip
 from constants import OPENAI_VISION_MODELS, OPENAI_REASONING_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS, \
     SYSTEM_MESSAGE_DEFAULT_TEXT, DEFAULT_FILE_NAMING_MODEL, MODEL_INFO, \
@@ -33,6 +38,15 @@ class ChatWindow:
 
         self.settings_window = None
         self.settings_frame = None
+        
+        # Initialize image storage with unique directory per window instance
+        import uuid
+        self.window_id = str(uuid.uuid4())[:8]  # Short unique ID for this window
+        base_temp_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "temp", "images")
+        self.temp_images_dir = os.path.join(base_temp_dir, self.window_id)
+        os.makedirs(self.temp_images_dir, exist_ok=True)
+        self.message_images = {}  # Maps message widget to list of image paths
+        self.image_counter = 0
 
         self.setup_openai_client()
         self.setup_anthropic_client()
@@ -303,10 +317,15 @@ class ChatWindow:
             {"role": "system", "content": self.system_message_widget.get("1.0", tk.END).strip()}
         ]
         for message in self.chat_history:
+            content = message["content_widget"].get("1.0", tk.END).strip()
+            # Get associated images for this content widget
+            local_images = self.get_images_for_widget(message["content_widget"])
+            
             messages.append(
                 {
                     "role": message["role"].get(),
-                    "content": message["content_widget"].get("1.0", tk.END).strip()
+                    "content": content,
+                    "local_images": local_images  # Add local images list
                 }
             )
         return messages
@@ -368,6 +387,7 @@ class ChatWindow:
                 self.stream_google_model_output(messages)
             else:
                 self.stream_openai_model_output(messages)
+            
         self.is_streaming_cancelled = False
         self.set_submit_button(False)
         Thread(target=request_thread).start()
@@ -640,16 +660,36 @@ class ChatWindow:
         message["content_widget"].insert(tk.END, content)
         message["content_widget"].bind("<KeyRelease>", lambda event, content_widget=message["content_widget"]: self.update_content_height(event, content_widget))
         message["content_widget"].bind("<<Paste>>", lambda event: self.handle_paste(event))
+        
+        # Initialize image list for this widget if needed
+        if message["content_widget"] not in self.message_images:
+            self.message_images[message["content_widget"]] = []
+        
+        # Platform-specific drag and drop setup
+        try:
+            # Try using tkinterdnd2 for proper drag and drop support
+            import tkinterdnd2 as tkdnd
+            message["content_widget"].drop_target_register(tkdnd.DND_FILES)
+            message["content_widget"].dnd_bind('<<Drop>>', lambda e, w=message["content_widget"]: self.handle_file_drop(e, w))
+        except ImportError:
+            # Fallback: Add right-click context menu for image insertion
+            message["content_widget"].bind("<Button-3>", lambda e, w=message["content_widget"]: self.show_image_context_menu(e, w))
+        
+        # Add image button for this message
+        message["image_button"] = ttk.Button(self.inner_frame, text="📷", width=3, 
+                                           command=lambda w=message["content_widget"]: self.add_image_to_message(w))
+        message["image_button"].grid(row=row, column=2, sticky="ne")
+        ToolTip(message["image_button"], "Add image to message")
         self.update_content_height(None, message["content_widget"])
 
         self.add_button_row += 1
         self.align_add_button()
 
         message["save_button"] = ttk.Button(self.inner_frame, text="s", width=2, command=lambda: self.save_scripts(message["content_widget"]))
-        message["save_button"].grid(row=row, column=2, sticky="ne")
+        message["save_button"].grid(row=row, column=3, sticky="ne")
 
         message["delete_button"] = ttk.Button(self.inner_frame, text="-", width=3, command=lambda: self.delete_message(row))
-        message["delete_button"].grid(row=row, column=3, sticky="ne")
+        message["delete_button"].grid(row=row, column=4, sticky="ne")
 
         self.chat_frame.yview_moveto(1.5)
 
@@ -816,6 +856,9 @@ class ChatWindow:
         with open("config.ini", "w") as config_file:
             self.config.write(config_file)
 
+        # Clean up temporary images for this window
+        self.cleanup_all_temp_images()
+        
         # Close the application
         self.app.destroy()
 
@@ -853,11 +896,13 @@ class ChatWindow:
         if model in OPENAI_VISION_MODELS and self.image_detail_var.get() != "none":
             # Count the number of images in the messages
             num_images = 0
-            parsed_messages = [parse_and_create_image_messages(message.get("content",""), self.image_detail_var.get()) for message in messages]
-            for message in parsed_messages:
-                for content in message["content"]:
-                    if "image_url" in content.get("type", ""):
-                        num_images+=1
+            for message in messages:
+                if message["role"] == "user":
+                    local_images = message.get("local_images", [])
+                    parsed_message = parse_and_create_image_messages(message.get("content",""), self.image_detail_var.get(), local_images)
+                    for content in parsed_message["content"]:
+                        if "image_url" in content.get("type", ""):
+                            num_images+=1
 
             # Calculate vision cost if the model is vision preview
             vision_cost = 0
@@ -1116,8 +1161,128 @@ class ChatWindow:
             # No clipboard content or other error
             return None
 
+    def add_image_to_message(self, content_widget):
+        """Open file dialog to select an image and add it to the message"""
+        file_types = [
+            ("Image files", "*.png *.jpg *.jpeg *.gif *.bmp *.webp"),
+            ("All files", "*.*")
+        ]
+        file_path = filedialog.askopenfilename(
+            title="Select an image",
+            filetypes=file_types
+        )
+        
+        if file_path:
+            self.insert_image_placeholder(content_widget, file_path)
+    
+    def insert_image_placeholder(self, content_widget, image_path):
+        """Insert an image placeholder in the text and store the image"""
+        try:
+            # Validate it's an image and copy to temp directory
+            with Image.open(image_path) as img:
+                # Create temp filename
+                image_ext = os.path.splitext(image_path)[1].lower()
+                if not image_ext:
+                    image_ext = '.png'
+                temp_filename = f"image_{self.image_counter}{image_ext}"
+                temp_path = os.path.join(self.temp_images_dir, temp_filename)
+                
+                # Copy image to temp directory
+                shutil.copy2(image_path, temp_path)
+                
+                # Track image for this widget
+                if content_widget not in self.message_images:
+                    self.message_images[content_widget] = []
+                
+                image_index = len(self.message_images[content_widget])
+                self.message_images[content_widget].append(temp_path)
+                
+                # Insert placeholder text
+                placeholder = f"[image #{image_index}]"
+                cursor_pos = content_widget.index(tk.INSERT)
+                content_widget.insert(cursor_pos, placeholder)
+                
+                # Update height
+                self.update_content_height(None, content_widget)
+                self.image_counter += 1
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load image: {str(e)}")
+    
+    def get_images_for_widget(self, content_widget):
+        """Get list of image paths for a specific content widget"""
+        return self.message_images.get(content_widget, [])
+    
+    def clear_images_for_widget(self, content_widget):
+        """Clear stored images for a widget"""
+        if content_widget in self.message_images:
+            # Clean up temp files
+            for image_path in self.message_images[content_widget]:
+                try:
+                    os.remove(image_path)
+                except OSError:
+                    pass
+            del self.message_images[content_widget]
+    
+    def cleanup_all_temp_images(self):
+        """Clean up all temporary images for this window"""
+        for content_widget in list(self.message_images.keys()):
+            self.clear_images_for_widget(content_widget)
+        
+        # Remove the entire window-specific temp directory
+        try:
+            if os.path.exists(self.temp_images_dir):
+                shutil.rmtree(self.temp_images_dir)
+        except OSError:
+            pass
+
     def create_new_window(self, event):
         # Handle key press event
         if event.state == 0x0004 and event.keysym == 'n':  # 0x0004 is the mask for the Control key on Windows/Linux
             new_root = tk.Toplevel(self.app)
             new_window = ChatWindow(new_root, self.config, self.os_name)
+    
+    def handle_file_drop(self, event, widget):
+        """Handle files dropped onto a text widget"""
+        if hasattr(event, 'data'):
+            files = event.data.split('\n') if isinstance(event.data, str) else [event.data]
+            for file_path in files:
+                file_path = file_path.strip()
+                if file_path and self.is_image_file(file_path):
+                    self.insert_image_placeholder(widget, file_path)
+        return 'break'
+    
+    def show_image_context_menu(self, event, widget):
+        """Show context menu for adding images when drag-and-drop is not available"""
+        menu = tk.Menu(self.app, tearoff=0)
+        menu.add_command(label="Insert Image", command=lambda: self.add_image_to_message(widget))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+    
+    def is_image_file(self, file_path):
+        """Check if the file is an image based on its extension and MIME type"""
+        if not os.path.isfile(file_path):
+            return False
+        
+        # Check by extension
+        image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp'}
+        file_ext = os.path.splitext(file_path.lower())[1]
+        if file_ext not in image_extensions:
+            return False
+        
+        # Check MIME type
+        mime_type, _ = mimetypes.guess_type(file_path)
+        return mime_type and mime_type.startswith('image/')
+    
+    def cleanup_sent_message_images(self):
+        """Clean up images from all messages except the current (last) one being composed"""
+        if len(self.chat_history) <= 1:
+            return
+            
+        # Clear images from all messages except the last one (which is the new empty user message)
+        for message in self.chat_history[:-1]:
+            content_widget = message.get("content_widget")
+            if content_widget and content_widget in self.message_images:
+                self.clear_images_for_widget(content_widget)

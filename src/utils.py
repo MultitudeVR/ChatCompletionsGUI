@@ -2,6 +2,8 @@ from constants import OPENAI_VISION_MODELS, OPENAI_REASONING_MODELS, ANTHROPIC_M
 import re
 import requests
 import tiktoken
+import base64
+import os
 
 def count_tokens(messages, model):
     """Return the number of tokens used by a list of messages."""
@@ -20,6 +22,8 @@ def count_tokens(messages, model):
     for message in messages:
         num_tokens += tokens_per_message
         for key, value in message.items():
+            if key == "local_images":
+                continue  # Skip local_images field - not sent to API
             num_tokens += len(encoding.encode(value))
             if key == "name":
                 num_tokens += tokens_per_name
@@ -59,19 +63,68 @@ def is_image_url(url):
     except requests.RequestException as e:
         return False
 
-def parse_and_create_image_messages(content, image_detail):
-    url_pattern = r"(https?://[^\s,\"\{\}]+)"
-    parts = re.split(url_pattern, content)
+def encode_image_to_base64(image_path):
+    """Encode a local image file to base64 for API use"""
+    try:
+        with open(image_path, "rb") as image_file:
+            encoded_data = base64.b64encode(image_file.read()).decode('utf-8')
+            # Get MIME type based on file extension
+            ext = os.path.splitext(image_path)[1].lower()
+            mime_type = {
+                '.png': 'image/png',
+                '.jpg': 'image/jpeg', 
+                '.jpeg': 'image/jpeg',
+                '.gif': 'image/gif',
+                '.bmp': 'image/bmp',
+                '.webp': 'image/webp'
+            }.get(ext, 'image/jpeg')
+            
+            return f"data:{mime_type};base64,{encoded_data}"
+    except Exception as e:
+        print(f"Error encoding image {image_path}: {e}")
+        return None
+
+def parse_and_create_image_messages(content, image_detail, local_images=None):
+    """Parse content with URLs and image placeholders, create proper message format"""
+    if local_images is None:
+        local_images = []
+    
+    # First handle local image placeholders like [image #0]
+    image_placeholder_pattern = r"\[image #(\d+)\]"
+    
+    # Replace image placeholders with their base64 data URLs
+    def replace_placeholder(match):
+        image_index = int(match.group(1))
+        if image_index < len(local_images):
+            base64_url = encode_image_to_base64(local_images[image_index])
+            if base64_url:
+                return f"LOCAL_IMAGE:{base64_url}"
+        return match.group(0)  # Return original if can't process
+    
+    content_with_local = re.sub(image_placeholder_pattern, replace_placeholder, content)
+    
+    # Now handle both URLs and local images
+    url_pattern = r"(https?://[^\s,\"\{\}]+|LOCAL_IMAGE:data:[^,]+;base64,[A-Za-z0-9+/=]+)"
+    parts = re.split(url_pattern, content_with_local)
 
     messages = []
     for text in parts:
-        if is_image_url(text):
+        if text.startswith("LOCAL_IMAGE:"):
+            # Handle local base64 image
+            base64_url = text[12:]  # Remove "LOCAL_IMAGE:" prefix
+            messages.append({"type": "image_url", "image_url": {"url": base64_url, "detail": image_detail}})
+        elif is_image_url(text):
+            # Handle remote URL image
             messages.append({"type": "image_url", "image_url": {"url": text, "detail": image_detail}})
         elif messages and messages[-1].get("type") == "text":
             messages[-1]["text"] += text
         elif text:
             messages.append({"type": "text", "text": text})
     return {"role": "user", "content": messages}
+
+def parse_and_create_image_messages_legacy(content, image_detail):
+    """Legacy function for backwards compatibility"""
+    return parse_and_create_image_messages(content, image_detail)
 
 def convert_messages_for_model(model, messages, image_detail="low"):
     if model in OPENAI_REASONING_MODELS:
@@ -91,12 +144,15 @@ def convert_messages_for_model(model, messages, image_detail="low"):
         new_messages = []
         for message in messages:
             if message["role"] == "user" and "content" in message:
-                # Check for image URLs and create a single message with a 'content' array
-                message_with_images = parse_and_create_image_messages(message["content"], image_detail)
+                # Get local images for this message
+                local_images = message.get("local_images", [])
+                # Check for image URLs and local images, create a single message with a 'content' array
+                message_with_images = parse_and_create_image_messages(message["content"], image_detail, local_images)
                 new_messages.append(message_with_images)
             else:
-                # System or assistant messages are added unchanged
-                new_messages.append(message)
+                # System or assistant messages are added unchanged (remove local_images field if present)
+                clean_message = {k: v for k, v in message.items() if k != "local_images"}
+                new_messages.append(clean_message)
         return new_messages, None
     elif model in ANTHROPIC_MODELS:
         # Anthropic API has a bunch of extra requirements not present in OpenAI's API
@@ -134,4 +190,9 @@ def convert_messages_for_model(model, messages, image_detail="low"):
         if google_messages[-1]["role"] == "model":
             google_messages.append({"role": "user", "parts": ["<no message>"]})
         return google_messages, None
-    return messages, None
+    # Clean up local_images field for non-vision models
+    clean_messages = []
+    for message in messages:
+        clean_message = {k: v for k, v in message.items() if k != "local_images"}
+        clean_messages.append(clean_message)
+    return clean_messages, None
