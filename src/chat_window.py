@@ -1150,98 +1150,89 @@ class ChatWindow:
     def update_previous_focused_widget(self, event):
         self.previous_focused_widget = event.widget
     
+    def try_image_paste(self, widget):
+        """Safely try to paste an image from clipboard"""
+        if self.os_name == "Linux":
+            # First, quickly check if clipboard contains image data without grabbing it
+            try:
+                import subprocess
+                # Check clipboard targets to see if there's image data
+                result = subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'TARGETS', '-o'], 
+                                      capture_output=True, timeout=0.05, text=True)
+                if result.returncode != 0:
+                    return False
+                
+                # Look for image MIME types in the targets
+                targets = result.stdout.lower()
+                has_image = any(target in targets for target in ['image/png', 'image/jpeg', 'image/gif', 'image/bmp', 'image/webp'])
+                
+                if not has_image:
+                    return False
+                    
+            except Exception:
+                return False
+        
+        # If we get here, either we're not on Linux or there might be an image
+        try:
+            clipboard_image = ImageGrab.grabclipboard()
+            
+            if clipboard_image and isinstance(clipboard_image, Image.Image):
+                # Delete selection if any
+                if widget.tag_ranges("sel"):
+                    widget.delete("sel.first", "sel.last")
+                
+                # Save the image to temp directory
+                image_ext = '.png'
+                temp_filename = f"image_{self.image_counter}{image_ext}"
+                temp_path = os.path.join(self.temp_images_dir, temp_filename)
+                
+                # Save the image
+                clipboard_image.save(temp_path, 'PNG')
+                
+                # Track image for this widget
+                if widget not in self.message_images:
+                    self.message_images[widget] = []
+                
+                image_index = len(self.message_images[widget])
+                self.message_images[widget].append(temp_path)
+                
+                # Insert placeholder text
+                placeholder = f"[image #{image_index}]"
+                widget.insert("insert", placeholder)
+                
+                # Update height and increment counter
+                self.update_content_height(None, widget)
+                self.image_counter += 1
+                
+                return True
+                
+        except Exception:
+            return False
+        
+        return False
+
     def handle_paste(self, event):
         """Handle paste events to replace selected text instead of inserting after it"""
         widget = event.widget
         
-        # On Linux, only try image paste if xclip is available
-        if self.os_name == "Linux":
-            # Check if xclip is available
-            try:
-                import subprocess
-                result = subprocess.run(['which', 'xclip'], capture_output=True, timeout=0.1)
-                has_xclip = result.returncode == 0
-            except:
-                has_xclip = False
-                
-            if has_xclip:
-                # Try to handle image paste
-                try:
-                    # Try to get image from clipboard using PIL
-                    clipboard_image = ImageGrab.grabclipboard()
-                    
-                    if clipboard_image and isinstance(clipboard_image, Image.Image):
-                        # Delete selection if any
-                        if widget.tag_ranges("sel"):
-                            widget.delete("sel.first", "sel.last")
-                        
-                        # Save the image to temp directory
-                        image_ext = '.png'
-                        temp_filename = f"image_{self.image_counter}{image_ext}"
-                        temp_path = os.path.join(self.temp_images_dir, temp_filename)
-                        
-                        # Save the image
-                        clipboard_image.save(temp_path, 'PNG')
-                        
-                        # Track image for this widget
-                        if widget not in self.message_images:
-                            self.message_images[widget] = []
-                        
-                        image_index = len(self.message_images[widget])
-                        self.message_images[widget].append(temp_path)
-                        
-                        # Insert placeholder text
-                        placeholder = f"[image #{image_index}]"
-                        widget.insert("insert", placeholder)
-                        
-                        # Update height and increment counter
-                        self.update_content_height(None, widget)
-                        self.image_counter += 1
-                        
-                        return "break"
-                except Exception as e:
-                    # If image paste fails, continue with text paste
-                    pass
-        else:
-            # For non-Linux systems, try image paste
-            try:
-                # Try to get image from clipboard using PIL
-                clipboard_image = ImageGrab.grabclipboard()
-                
-                if clipboard_image and isinstance(clipboard_image, Image.Image):
-                    # Delete selection if any
-                    if widget.tag_ranges("sel"):
-                        widget.delete("sel.first", "sel.last")
-                    
-                    # Save the image to temp directory
-                    image_ext = '.png'
-                    temp_filename = f"image_{self.image_counter}{image_ext}"
-                    temp_path = os.path.join(self.temp_images_dir, temp_filename)
-                    
-                    # Save the image
-                    clipboard_image.save(temp_path, 'PNG')
-                    
-                    # Track image for this widget
-                    if widget not in self.message_images:
-                        self.message_images[widget] = []
-                    
-                    image_index = len(self.message_images[widget])
-                    self.message_images[widget].append(temp_path)
-                    
-                    # Insert placeholder text
-                    placeholder = f"[image #{image_index}]"
-                    widget.insert("insert", placeholder)
-                    
-                    # Update height and increment counter
-                    self.update_content_height(None, widget)
-                    self.image_counter += 1
-                    
-                    return "break"
-            except Exception:
-                # If image paste fails, continue with text paste
-                pass
+        # Safety check - only handle paste for our own widgets
+        if not hasattr(widget, 'winfo_toplevel'):
+            return None
+            
+        try:
+            # Check if this is actually our window
+            if widget.winfo_toplevel() != self.app:
+                return None
+        except:
+            return None
         
-        # Handle regular text paste
+        # First try image paste if we're in a vision-capable context
+        current_model = self.model_var.get()
+        if (current_model in OPENAI_VISION_MODELS or current_model in ANTHROPIC_VISION_MODELS) and self.image_detail_var.get() != "none":
+            if self.try_image_paste(widget):
+                return "break"
+        
+        # Fall back to regular text paste
         try:
             # Get clipboard content
             clipboard_content = self.app.clipboard_get()
@@ -1255,13 +1246,15 @@ class ChatWindow:
             widget.insert("insert", clipboard_content)
             
             # Trigger height update for content widgets
-            if hasattr(widget, '_name') and widget in [msg["content_widget"] for msg in self.chat_history if "content_widget" in msg]:
-                self.update_content_height(None, widget)
+            self.update_content_height(None, widget)
             
             # Prevent default paste behavior
             return "break"
         except tk.TclError:
             # No clipboard content or other error
+            return None
+        except Exception:
+            # Any other error, just let default paste happen
             return None
 
     def add_image_to_message(self, content_widget):
