@@ -72,8 +72,8 @@ class ChatWindow:
         self.system_message_widget.grid(row=0, column=1, sticky="we", pady=3)
         self.system_message_widget.insert(tk.END, system_message.get())
         self.system_message_widget.bind("<<Paste>>", lambda event: self.handle_paste(event))
-        self.system_message_widget.bind("<Control-a>", lambda event: event.widget.tag_add("sel", "1.0", "end-1c") or "break")
-        self.system_message_widget.bind("<Control-A>", lambda event: event.widget.tag_add("sel", "1.0", "end-1c") or "break")
+        self.system_message_widget.bind("<Control-a>", lambda event: self.safe_select_all(event))
+        self.system_message_widget.bind("<Control-A>", lambda event: self.safe_select_all(event))
 
         last_used_model = self.config.get("app", "last_used_model", fallback="gpt-4.1")
         self.model_var = tk.StringVar(value=last_used_model)
@@ -662,8 +662,8 @@ class ChatWindow:
         message["content_widget"].insert(tk.END, content)
         message["content_widget"].bind("<KeyRelease>", lambda event, content_widget=message["content_widget"]: self.update_content_height(event, content_widget))
         message["content_widget"].bind("<<Paste>>", lambda event: self.handle_paste(event))
-        message["content_widget"].bind("<Control-a>", lambda event: event.widget.tag_add("sel", "1.0", "end-1c") or "break")
-        message["content_widget"].bind("<Control-A>", lambda event: event.widget.tag_add("sel", "1.0", "end-1c") or "break")
+        message["content_widget"].bind("<Control-a>", lambda event: self.safe_select_all(event))
+        message["content_widget"].bind("<Control-A>", lambda event: self.safe_select_all(event))
         
         # Initialize image list for this widget if needed
         if message["content_widget"] not in self.message_images:
@@ -1149,6 +1149,23 @@ class ChatWindow:
 
     def update_previous_focused_widget(self, event):
         self.previous_focused_widget = event.widget
+    
+    def safe_select_all(self, event):
+        """Safely select all text without tkinter's trailing newline"""
+        widget = event.widget
+        
+        # Get the actual content length (excluding tkinter's automatic newline)
+        content = widget.get("1.0", "end-1c")
+        if content:
+            # Select only the actual content
+            widget.tag_remove("sel", "1.0", "end")
+            widget.tag_add("sel", "1.0", f"1.0+{len(content)}c")
+            widget.mark_set("insert", f"1.0+{len(content)}c")
+        else:
+            # If empty, just position cursor at start
+            widget.mark_set("insert", "1.0")
+        
+        return "break"
     
     def try_image_paste(self, widget):
         """Safely try to paste an image from clipboard"""
