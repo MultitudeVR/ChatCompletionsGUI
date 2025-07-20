@@ -16,7 +16,7 @@ import shutil
 import base64
 from io import BytesIO
 import mimetypes
-from PIL import Image
+from PIL import Image, ImageGrab
 from tooltip import ToolTip
 from constants import OPENAI_VISION_MODELS, OPENAI_REASONING_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS, \
     SYSTEM_MESSAGE_DEFAULT_TEXT, DEFAULT_FILE_NAMING_MODEL, MODEL_INFO, \
@@ -1139,6 +1139,54 @@ class ChatWindow:
     def handle_paste(self, event):
         """Handle paste events to replace selected text instead of inserting after it"""
         widget = event.widget
+        
+        # First, try to handle image paste
+        try:
+            # Try to get image from clipboard using PIL
+            clipboard_image = ImageGrab.grabclipboard()
+            
+            if clipboard_image and isinstance(clipboard_image, Image.Image):
+                # Delete selection if any
+                if widget.tag_ranges("sel"):
+                    widget.delete("sel.first", "sel.last")
+                
+                # Save the image to temp directory
+                image_ext = '.png'
+                temp_filename = f"image_{self.image_counter}{image_ext}"
+                temp_path = os.path.join(self.temp_images_dir, temp_filename)
+                
+                # Save the image
+                clipboard_image.save(temp_path, 'PNG')
+                
+                # Track image for this widget
+                if widget not in self.message_images:
+                    self.message_images[widget] = []
+                
+                image_index = len(self.message_images[widget])
+                self.message_images[widget].append(temp_path)
+                
+                # Insert placeholder text
+                placeholder = f"[image #{image_index}]"
+                widget.insert("insert", placeholder)
+                
+                # Update height and increment counter
+                self.update_content_height(None, widget)
+                self.image_counter += 1
+                
+                return "break"
+        except NotImplementedError:
+            # On Linux, PIL needs xclip or wl-paste installed
+            if self.os_name == "Linux":
+                print("Image paste requires xclip (X11) or wl-paste (Wayland) to be installed.")
+                print("Install with: sudo apt install xclip")
+            # Continue with text paste
+            pass
+        except Exception as e:
+            # If image paste fails for other reasons, continue with text paste
+            print(f"Image paste error: {e}")
+            pass
+        
+        # Handle regular text paste
         try:
             # Get clipboard content
             clipboard_content = self.app.clipboard_get()
