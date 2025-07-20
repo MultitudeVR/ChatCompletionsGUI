@@ -20,7 +20,7 @@ from PIL import Image, ImageGrab
 from tooltip import ToolTip
 from constants import OPENAI_VISION_MODELS, OPENAI_REASONING_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS, \
     SYSTEM_MESSAGE_DEFAULT_TEXT, DEFAULT_FILE_NAMING_MODEL, MODEL_INFO, \
-    HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE
+    HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE, ANTHROPIC_VISION_MODELS
 from prompts import file_naming_prompt
 from utils import convert_messages_for_model, parse_and_create_image_messages, count_tokens, convert_text_to_tokens, convert_tokens_to_text
 from custom_server import CustomServer
@@ -791,7 +791,7 @@ class ChatWindow:
         self.add_message("user" if len(self.chat_history) == 0 or self.chat_history[-1]["role"].get() == "assistant" else "assistant", "")
 
     def update_image_detail_visibility(self, *args):
-        if self.model_var.get() in OPENAI_VISION_MODELS:
+        if self.model_var.get() in OPENAI_VISION_MODELS or self.model_var.get() in ANTHROPIC_VISION_MODELS:
             self.image_detail_dropdown.grid(row=0, column=8, sticky="ne")
         else:
             self.image_detail_dropdown.grid_remove()
@@ -893,7 +893,7 @@ class ChatWindow:
         total_cost = input_cost + output_cost
         cost_message = f"Input Cost: ${input_cost:.5f}\nOutput Cost: ${output_cost:.5f}"
 
-        if model in OPENAI_VISION_MODELS and self.image_detail_var.get() != "none":
+        if (model in OPENAI_VISION_MODELS or model in ANTHROPIC_VISION_MODELS) and self.image_detail_var.get() != "none":
             # Count the number of images in the messages
             num_images = 0
             for message in messages:
@@ -904,15 +904,25 @@ class ChatWindow:
                         if "image_url" in content.get("type", ""):
                             num_images+=1
 
-            # Calculate vision cost if the model is vision preview
+            # Calculate vision cost
             vision_cost = 0
-            if self.image_detail_var.get() == "low":
-                vision_cost = LOW_DETAIL_COST_PER_IMAGE * num_images * (0.5 if model == 'gpt-4o' else 1)
-            else:
-                # Estimated cost for high detail images
-                vision_cost = HIGH_DETAIL_COST_PER_IMAGE * num_images * (0.5 if model == 'gpt-4o' else 1)
-            total_cost = vision_cost
-            cost_message += f"\nVision Cost: ${total_cost:.5f} for {num_images} images"
+            if model in ANTHROPIC_VISION_MODELS and num_images > 0:
+                # For Anthropic, calculate based on image tokens
+                # Approximate: 1092x1092 px image uses ~1590 tokens
+                tokens_per_image = 1590
+                if model_info:
+                    # Use input price for vision tokens
+                    vision_cost = (tokens_per_image * num_images / 1000000) * model_info.get("input_price", 0)
+                cost_message += f"\nVision Cost: ${vision_cost:.5f} for {num_images} images (~{tokens_per_image * num_images} tokens)"
+            elif model in OPENAI_VISION_MODELS:
+                # OpenAI vision cost calculation
+                if self.image_detail_var.get() == "low":
+                    vision_cost = LOW_DETAIL_COST_PER_IMAGE * num_images * (0.5 if model == 'gpt-4o' else 1)
+                else:
+                    # Estimated cost for high detail images
+                    vision_cost = HIGH_DETAIL_COST_PER_IMAGE * num_images * (0.5 if model == 'gpt-4o' else 1)
+                total_cost = vision_cost
+                cost_message += f"\nVision Cost: ${total_cost:.5f} for {num_images} images"
 
         messagebox.showinfo("Token Count and Cost", f"Number of tokens: {total_tokens} (Input: {num_input_tokens}, Output: {num_output_tokens})\n{cost_message}")
 

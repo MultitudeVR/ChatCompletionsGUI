@@ -78,6 +78,17 @@ OPENAI_REASONING_MODELS = [
     'o1-mini-2024-09-12',
     'o1-preview-2024-09-12',
 ]
+ANTHROPIC_VISION_MODELS = [
+    'claude-opus-4-20250514',
+    'claude-sonnet-4-20250514',
+    'claude-3-7-sonnet-20250219',
+    'claude-3-5-sonnet-20241022',
+    'claude-3-5-haiku-20241022',
+    'claude-3-5-sonnet-20240620',
+    'claude-3-haiku-20240307',
+    'claude-3-opus-20240229',
+    'claude-3-sonnet-20240229',
+]
 MODEL_INFO = {
     "gpt-4.1": {"max_tokens": 128000, "input_price": 0.002, "output_price": 0.008},
     "gpt-4.1-mini": {"max_tokens": 128000, "input_price": 0.0004, "output_price": 0.0016},

@@ -1,4 +1,4 @@
-from constants import OPENAI_VISION_MODELS, OPENAI_REASONING_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS
+from constants import OPENAI_VISION_MODELS, OPENAI_REASONING_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS, ANTHROPIC_VISION_MODELS
 import re
 import requests
 import tiktoken
@@ -162,14 +162,57 @@ def convert_messages_for_model(model, messages, image_detail="low"):
             if message["role"] == "system":
                 system_content += message["content"] + "\n"
             elif message["content"]:
-                anthropic_messages.append({"role": message["role"], "content": message["content"]})
+                # Handle vision models
+                if model in ANTHROPIC_VISION_MODELS and message["role"] == "user" and image_detail != "none":
+                    local_images = message.get("local_images", [])
+                    # Parse content for URLs and local images
+                    parsed_message = parse_and_create_image_messages(message["content"], image_detail, local_images)
+                    # Convert to Anthropic format
+                    anthropic_content = []
+                    for content_item in parsed_message["content"]:
+                        if content_item["type"] == "text":
+                            anthropic_content.append({"type": "text", "text": content_item["text"]})
+                        elif content_item["type"] == "image_url":
+                            url = content_item["image_url"]["url"]
+                            if url.startswith("data:"):
+                                # Extract base64 data
+                                media_type, base64_data = url.split(";base64,", 1)
+                                media_type = media_type.replace("data:", "")
+                                anthropic_content.append({
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": media_type,
+                                        "data": base64_data
+                                    }
+                                })
+                            else:
+                                # For URL images, we need to fetch and convert to base64
+                                # This is a limitation - Anthropic doesn't support URL images directly
+                                try:
+                                    response = requests.get(url, timeout=10)
+                                    if response.status_code == 200:
+                                        base64_data = base64.b64encode(response.content).decode('utf-8')
+                                        # Guess media type from response headers or URL
+                                        media_type = response.headers.get('content-type', 'image/jpeg')
+                                        anthropic_content.append({
+                                            "type": "image",
+                                            "source": {
+                                                "type": "base64",
+                                                "media_type": media_type,
+                                                "data": base64_data
+                                            }
+                                        })
+                                except:
+                                    # If we can't fetch the image, skip it
+                                    pass
+                    anthropic_messages.append({"role": message["role"], "content": anthropic_content})
+                else:
+                    # Non-vision message or non-user message
+                    clean_message = {k: v for k, v in message.items() if k != "local_images"}
+                    anthropic_messages.append({"role": clean_message["role"], "content": clean_message["content"]})
         if len(anthropic_messages) == 0 or anthropic_messages[0]["role"] == "assistant":
             anthropic_messages.insert(0, {"role": "user", "content": "<no message>"})
-        # for i in range(len(anthropic_messages) - 1, 0, -1):
-        #     if anthropic_messages[i]["role"] == anthropic_messages[i - 1]["role"]:
-        #         anthropic_messages.insert(i, {"role": "user" if anthropic_messages[i]["role"] == "assistant" else "assistant", "content": "<no message>"})
-        # if anthropic_messages[-1]["role"] == "assistant":
-        #     anthropic_messages.append({"role": "user", "content": "<no message>"})
         return anthropic_messages, system_content
     elif model in GOOGLE_MODELS:
         # Google API also has a bunch of extra requirements not present in OpenAI's API
