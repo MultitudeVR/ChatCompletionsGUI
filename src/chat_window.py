@@ -74,6 +74,18 @@ class ChatWindow:
         self.system_message_widget.bind("<<Paste>>", lambda event: self.handle_paste(event))
         self.system_message_widget.bind("<Control-a>", lambda event: self.safe_select_all(event))
         self.system_message_widget.bind("<Control-A>", lambda event: self.safe_select_all(event))
+        
+        # Create resize handle for system message
+        self.resize_handle = tk.Label(self.main_frame, text="⋮⋮", cursor="sb_v_double_arrow", 
+                                     font=("Arial", 8), fg="gray")
+        self.resize_handle.grid(row=0, column=2, sticky="se", padx=(0, 2), pady=(0, 2))
+        self.resize_handle.bind("<Button-1>", self.start_resize)
+        self.resize_handle.bind("<B1-Motion>", self.do_resize)
+        self.resize_handle.bind("<ButtonRelease-1>", self.stop_resize)
+        
+        # Store initial height
+        self.system_message_height = 5
+        self.resize_start_y = None
 
         last_used_model = self.config.get("app", "last_used_model", fallback="gpt-4.1")
         self.model_var = tk.StringVar(value=last_used_model)
@@ -168,6 +180,7 @@ class ChatWindow:
         # Add image detail dropdown
         self.image_detail_var = tk.StringVar(value="low")
         self.image_detail_dropdown = ttk.OptionMenu(self.main_frame, self.image_detail_var, "low", "none", "low", "high")
+        self.image_detail_dropdown.grid(row=0, column=8, sticky="ne")
         self.update_image_detail_visibility()
 
         # Update image detail visibility based on selected model
@@ -974,6 +987,8 @@ class ChatWindow:
             for widget in self.main_frame.winfo_children():
                 if isinstance(widget, (ttk.Label, ttk.OptionMenu, ttk.Checkbutton)):
                     widget.configure(style="Dark." + widget.winfo_class())
+                elif isinstance(widget, tk.Label) and widget == self.resize_handle:
+                    widget.configure(bg="#2c2c2c", fg="#666666")
             for widget in self.configuration_frame.winfo_children():
                 if isinstance(widget, (ttk.Label, ttk.OptionMenu, ttk.Checkbutton)):
                     widget.configure(style="Dark." + widget.winfo_class())
@@ -992,6 +1007,8 @@ class ChatWindow:
             for widget in self.main_frame.winfo_children():
                 if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
                     widget.configure(style=widget.winfo_class())
+                elif isinstance(widget, tk.Label) and widget == self.resize_handle:
+                    widget.configure(bg=self.default_bg_color, fg="gray")
             for widget in self.configuration_frame.winfo_children():
                 if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
                     widget.configure(style=widget.winfo_class())
@@ -1367,6 +1384,29 @@ class ChatWindow:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+    
+    def start_resize(self, event):
+        """Start resizing the system message widget"""
+        self.resize_start_y = event.y_root
+        self.resize_start_height = self.system_message_height
+        
+    def do_resize(self, event):
+        """Handle the resize drag motion"""
+        if self.resize_start_y is not None:
+            # Calculate the change in pixels
+            delta_y = event.y_root - self.resize_start_y
+            # Convert pixel change to line height change (approximately 20 pixels per line)
+            delta_lines = delta_y // 20
+            new_height = max(2, self.resize_start_height + delta_lines)  # Minimum 2 lines
+            new_height = min(20, new_height)  # Maximum 20 lines
+            
+            if new_height != self.system_message_height:
+                self.system_message_height = new_height
+                self.system_message_widget.configure(height=new_height)
+                
+    def stop_resize(self, event):
+        """Stop resizing"""
+        self.resize_start_y = None
     
     def is_image_file(self, file_path):
         """Check if the file is an image based on its extension and MIME type"""
