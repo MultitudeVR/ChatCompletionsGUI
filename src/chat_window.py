@@ -68,7 +68,7 @@ class ChatWindow:
         # System message and model selection
         system_message = tk.StringVar(value=SYSTEM_MESSAGE_DEFAULT_TEXT)
         ttk.Label(self.main_frame, text="System message:").grid(row=0, column=0, sticky="w")
-        self.system_message_widget = tk.Text(self.main_frame, wrap=tk.WORD, height=5, width=50, undo=True)
+        self.system_message_widget = tk.Text(self.main_frame, wrap=tk.WORD, height=5, undo=True)
         self.system_message_widget.grid(row=0, column=1, sticky="we", pady=3)
         self.system_message_widget.insert(tk.END, system_message.get())
         self.system_message_widget.bind("<<Paste>>", lambda event: self.handle_paste(event))
@@ -114,7 +114,8 @@ class ChatWindow:
 
         self.inner_frame = ttk.Frame(self.chat_frame)
         self.inner_frame.rowconfigure(0, weight=1)
-        self.chat_frame.create_window((0, 0), window=self.inner_frame, anchor="nw")
+        self.inner_frame.columnconfigure(1, weight=1)  # Make column 1 (text widgets) expand
+        self.chat_frame_window = self.chat_frame.create_window((0, 0), window=self.inner_frame, anchor="nw")
 
         chat_scroll = ttk.Scrollbar(self.main_frame, orient="vertical", command=self.chat_frame.yview)
         chat_scroll.grid(row=1, column=9, sticky="ns")
@@ -209,7 +210,7 @@ class ChatWindow:
 
         # Bind events
         self.inner_frame.bind("<Configure>", self.configure_scrollregion)
-        self.app.bind("<Configure>", self.update_entry_widths)
+        self.chat_frame.bind("<Configure>", self.update_entry_widths)
         self.app.bind_class('Entry', '<FocusOut>', self.update_previous_focused_widget)
         self.app.bind("<Escape>", lambda event: self.toggle_settings_window())
         # Bind Command-N to open new windows (Control-N on Windows/Linux)
@@ -617,22 +618,15 @@ class ChatWindow:
         self.add_message("user", "")
         self.set_submit_button(True)
 
-    # Hack. Not sure why the message entries don't just scale to fit the canvas automatically
     def update_entry_widths(self, event=None):
-        window_width = self.app.winfo_width()
-        screen_width = self.app.winfo_screenwidth()
-        dpi = self.app.winfo_fpixels('1i')
-        if sys.platform == 'darwin':
-            scaling_factor = 0.09 * (96/dpi)
-        elif os.name == 'posix':
-            scaling_factor = 0.08 * (96/dpi)
-        else:
-            scaling_factor = 0.12 * (96/dpi)
-        # Calculate the new width of the Text widgets based on the window width
-        new_entry_width = int((window_width - scaling_factor*1000) * scaling_factor)
-
-        for message in self.chat_history:
-            message["content_widget"].configure(width=new_entry_width)
+        # Update the canvas window width to match canvas width
+        canvas_width = self.chat_frame.winfo_width()
+        if canvas_width > 1:  # Ensure canvas has been drawn
+            # Update inner frame width to match canvas width minus scrollbar
+            self.chat_frame.itemconfig(self.chat_frame_window, width=canvas_width - 20)
+            
+            # Force the inner frame to update its layout
+            self.inner_frame.update_idletasks()
 
 
     def update_content_height(self, event, content_widget):
@@ -657,7 +651,7 @@ class ChatWindow:
         row = len(self.chat_history)
         message["role_button"] = ttk.Button(self.inner_frame, textvariable=message["role"], command=lambda: self.toggle_role(message), width=8)
         message["role_button"].grid(row=row, column=0, sticky="nw")
-        message["content_widget"] = tk.Text(self.inner_frame, wrap=tk.WORD, height=1, width=50, undo=True)
+        message["content_widget"] = tk.Text(self.inner_frame, wrap=tk.WORD, height=1, undo=True)
         message["content_widget"].grid(row=row, column=1, sticky="we")
         message["content_widget"].insert(tk.END, content)
         message["content_widget"].bind("<KeyRelease>", lambda event, content_widget=message["content_widget"]: self.update_content_height(event, content_widget))
