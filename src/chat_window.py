@@ -89,32 +89,32 @@ class ChatWindow:
 
         last_used_model = self.config.get("app", "last_used_model", fallback="gpt-4.1")
         self.model_var = tk.StringVar(value=last_used_model)
-        ttk.Label(self.main_frame, text="Model:").grid(row=0, column=6, sticky="ne")
+        ttk.Label(self.main_frame, text="Model:").grid(row=0, column=6, sticky="ne", pady=(0, 40))
         self.update_models_dropdown()
 
         # Add sliders for temperature, max length, and top p
         last_used_temperature = self.config.get("app", "last_used_temperature", fallback="0.7")
         self.temperature_var = tk.DoubleVar(value=last_used_temperature)
-        ttk.Label(self.main_frame, text="Temperature:").grid(row=0, column=6, sticky="e")
+        ttk.Label(self.main_frame, text="Temperature:").grid(row=0, column=6, sticky="ne", pady=(30, 0))
         self.temperature_scale = ttk.Scale(self.main_frame, variable=self.temperature_var, from_=0, to=1, orient="horizontal")
-        self.temperature_scale.grid(row=0, column=7, sticky="w")
+        self.temperature_scale.grid(row=0, column=7, sticky="nw", pady=(30, 0))
 
         self.max_length_var = tk.IntVar(value=4000)
-        ttk.Label(self.main_frame, text="Max Length:").grid(row=0, column=6, sticky="se")
+        ttk.Label(self.main_frame, text="Max Length:").grid(row=0, column=6, sticky="ne", pady=(60, 0))
         self.max_length_scale = ttk.Scale(self.main_frame, variable=self.max_length_var, from_=1, to=8000, orient="horizontal")
-        self.max_length_scale.grid(row=0, column=7, sticky="sw")
+        self.max_length_scale.grid(row=0, column=7, sticky="nw", pady=(60, 0))
 
         # Add Entry widgets for temperature and max length
         self.temp_entry_var = tk.StringVar()
         self.temp_entry = ttk.Entry(self.main_frame, textvariable=self.temp_entry_var, width=5)
-        self.temp_entry.grid(row=0, column=8, sticky="w")
+        self.temp_entry.grid(row=0, column=8, sticky="nw", pady=(30, 0))
         self.temp_entry_var.set(self.temperature_var.get())
         self.temperature_var.trace("w", lambda *args: self.temp_entry_var.set(f"{self.temperature_var.get():.2f}"))
         self.temp_entry_var.trace("w", self.on_temp_entry_change)
 
         self.max_len_entry_var = tk.StringVar()
         self.max_len_entry = ttk.Entry(self.main_frame, textvariable=self.max_len_entry_var, width=5)
-        self.max_len_entry.grid(row=0, column=8, sticky="sw")
+        self.max_len_entry.grid(row=0, column=8, sticky="nw", pady=(60, 0))
         self.max_len_entry_var.set(self.max_length_var.get())
         self.max_length_var.trace("w", lambda *args: self.max_len_entry_var.set(self.max_length_var.get()))
         self.max_len_entry_var.trace("w", self.on_max_len_entry_change)
