@@ -2,10 +2,12 @@
 SYSTEM_MESSAGE_DEFAULT_TEXT = ""
 DEFAULT_FILE_NAMING_MODEL="gpt-4o-mini" # if empty, won't name files automatically
 OPENAI_MODELS = [
+    "gpt-5",
+    "gpt-5-mini",
+    "gpt-5-nano",
     "gpt-4.1",
     "gpt-4.1-mini",
     "gpt-4.1-nano",
-    "gpt-4.5-preview",
     "gpt-4o",
     "gpt-4o-mini",
     "chatgpt-4o-latest",
@@ -36,6 +38,7 @@ OPENAI_MODELS = [
     "gpt-3.5-turbo-16k-0613",
 ]
 ANTHROPIC_MODELS = [
+    "claude-opus-4-1-20250805",
     "claude-opus-4-20250514",
     "claude-sonnet-4-20250514",
     "claude-3-7-sonnet-20250219",
@@ -43,11 +46,7 @@ ANTHROPIC_MODELS = [
     "claude-3-5-haiku-20241022",
     "claude-3-5-sonnet-20240620",
     "claude-3-haiku-20240307",
-    "claude-3-opus-20240229", 
-    "claude-3-sonnet-20240229", 
-    "claude-2.1", 
-    "claude-2.0", 
-    "claude-instant-1.2"
+    "claude-3-opus-20240229"
 ]
 GOOGLE_MODELS = [
     "gemini-1.5-pro-latest",
@@ -55,6 +54,9 @@ GOOGLE_MODELS = [
     # "gemini-pro-vision", # TODO: Add support for gemini vision models
 ]
 OPENAI_VISION_MODELS = [
+    'gpt-5',
+    'gpt-5-mini',
+    'gpt-5-nano',
     'gpt-4.1',
     'gpt-4.1-mini',
     'gpt-4.1-nano',
@@ -79,6 +81,7 @@ OPENAI_REASONING_MODELS = [
     'o1-preview-2024-09-12',
 ]
 ANTHROPIC_VISION_MODELS = [
+    'claude-opus-4-1-20250805',
     'claude-opus-4-20250514',
     'claude-sonnet-4-20250514',
     'claude-3-7-sonnet-20250219',
@@ -87,13 +90,19 @@ ANTHROPIC_VISION_MODELS = [
     'claude-3-5-sonnet-20240620',
     'claude-3-haiku-20240307',
     'claude-3-opus-20240229',
-    'claude-3-sonnet-20240229',
+]
+GPT5_MODELS = [
+    'gpt-5',
+    'gpt-5-mini',
+    'gpt-5-nano',
 ]
 MODEL_INFO = {
+    "gpt-5": {"max_tokens": 128000, "input_price": 0.00125, "output_price": 0.01},
+    "gpt-5-mini": {"max_tokens": 128000, "input_price": 0.00025, "output_price": 0.002},
+    "gpt-5-nano": {"max_tokens": 128000, "input_price": 0.00005, "output_price": 0.0004},
     "gpt-4.1": {"max_tokens": 128000, "input_price": 0.002, "output_price": 0.008},
     "gpt-4.1-mini": {"max_tokens": 128000, "input_price": 0.0004, "output_price": 0.0016},
     "gpt-4.1-nano": {"max_tokens": 128000, "input_price": 0.0001, "output_price": 0.0004},
-    "gpt-4.5-preview": {"max_tokens": 128000, "input_price": 0.075, "output_price": 0.15},
     "gpt-4o": {"max_tokens": 128000, "input_price": 0.0025, "output_price": 0.01},
     "gpt-4-turbo": {"max_tokens": 128000, "input_price": 0.01, "output_price": 0.03},
     "gpt-4-turbo-2024-04-09": {"max_tokens": 128000, "input_price": 0.01, "output_price": 0.03},
@@ -116,6 +125,7 @@ MODEL_INFO = {
     "o3": {"max_tokens": 128000, "input_price": 0.002, "output_price": 0.008},
     "o3-mini": {"max_tokens": 128000, "input_price": 0.0011, "output_price": 0.0044},
     "o4-mini": {"max_tokens": 128000, "input_price": 0.0011, "output_price": 0.0044},
+    "claude-opus-4-1-20250805": {"max_tokens": 128000, "input_price": 0.015, "output_price": 0.075},
     "claude-opus-4-20250514": {"max_tokens": 128000, "input_price": 0.015, "output_price": 0.075},
     "claude-sonnet-4-20250514": {"max_tokens": 128000, "input_price": 0.003, "output_price": 0.015},
     "claude-3-7-sonnet-20250219": {"max_tokens": 128000, "input_price": 0.003, "output_price": 0.015},
@@ -125,9 +135,6 @@ MODEL_INFO = {
     "claude-3-haiku-20240307": {"max_tokens": 128000, "input_price": 0.00025, "output_price": 0.00125},
     "claude-3-opus-20240229": {"max_tokens": 128000, "input_price": 0.015, "output_price": 0.075},
     "claude-3-sonnet-20240229": {"max_tokens": 128000, "input_price": 0.003, "output_price": 0.015},
-    "claude-2.1": {"max_tokens": 128000, "input_price": 0.008, "output_price": 0.024},
-    "claude-2.0": {"max_tokens": 128000, "input_price": 0.008, "output_price": 0.024},
-    "claude-instant-1.2": {"max_tokens": 128000, "input_price": 0.0008, "output_price": 0.0024},
 }
 # Estimation for high detail image cost based on a 1024x1024 image
 # todo: get the actual image sizes for a more accurate estimation

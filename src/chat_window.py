@@ -20,7 +20,7 @@ from PIL import Image, ImageGrab
 from tooltip import ToolTip
 from constants import OPENAI_VISION_MODELS, OPENAI_REASONING_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS, \
     SYSTEM_MESSAGE_DEFAULT_TEXT, DEFAULT_FILE_NAMING_MODEL, MODEL_INFO, \
-    HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE, ANTHROPIC_VISION_MODELS
+    HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE, ANTHROPIC_VISION_MODELS, GPT5_MODELS
 from prompts import file_naming_prompt
 from utils import convert_messages_for_model, parse_and_create_image_messages, count_tokens, convert_text_to_tokens, convert_tokens_to_text
 from custom_server import CustomServer
@@ -429,6 +429,10 @@ class ChatWindow:
                     response = streaming_client.chat.completions.create(model=self.model_var.get(),
                         messages=messages,
                         temperature=1,
+                        stream=True)
+                elif self.model_var.get() in GPT5_MODELS:
+                    response = streaming_client.chat.completions.create(model=self.model_var.get(),
+                        messages=messages,
                         stream=True)
                 else:
                     response = streaming_client.chat.completions.create(model=self.model_var.get(),
