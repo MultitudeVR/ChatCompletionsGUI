@@ -1,4 +1,4 @@
-from constants import OPENAI_VISION_MODELS, OPENAI_REASONING_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS, ANTHROPIC_VISION_MODELS
+from constants import OPENAI_VISION_MODELS, OPENAI_REASONING_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS, ANTHROPIC_VISION_MODELS, GOOGLE_VISION_MODELS
 import re
 import requests
 import tiktoken
@@ -126,6 +126,48 @@ def parse_and_create_image_messages_legacy(content, image_detail):
     """Legacy function for backwards compatibility"""
     return parse_and_create_image_messages(content, image_detail)
 
+def _convert_image_url_to_part(image_url):
+    """Convert image URL to Google GenAI Part object"""
+    try:
+        from google.genai import types
+        
+        if image_url.startswith("data:"):
+            # Handle base64 encoded images
+            parts = image_url.split(";base64,", 1)
+            if len(parts) == 2:
+                mime_type = parts[0].replace("data:", "")
+                base64_data = parts[1]
+                
+                import base64
+                image_bytes = base64.b64decode(base64_data)
+                return types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+        else:
+            # Handle URL images - fetch and convert
+            import requests
+            response = requests.get(image_url, timeout=10)
+            if response.status_code == 200:
+                # Get MIME type from response headers or guess from URL
+                mime_type = response.headers.get('content-type')
+                if not mime_type:
+                    # Guess from URL extension
+                    if image_url.lower().endswith('.jpg') or image_url.lower().endswith('.jpeg'):
+                        mime_type = 'image/jpeg'
+                    elif image_url.lower().endswith('.png'):
+                        mime_type = 'image/png'
+                    elif image_url.lower().endswith('.gif'):
+                        mime_type = 'image/gif'
+                    elif image_url.lower().endswith('.webp'):
+                        mime_type = 'image/webp'
+                    else:
+                        mime_type = 'image/jpeg'  # Default fallback
+                
+                return types.Part.from_bytes(data=response.content, mime_type=mime_type)
+    except Exception as e:
+        print(f"Error converting image URL to Part: {e}")
+        return None
+    
+    return None
+
 def convert_messages_for_google(messages):
     """Convert messages to Google GenAI format using proper types"""
     try:
@@ -148,15 +190,35 @@ def convert_messages_for_google(messages):
             if isinstance(content, str):
                 contents.append(types.Content(role="user", parts=[types.Part(text=content)]))
             else:
-                # Handle complex content (images, etc.) - extract text for now
-                text_content = ""
+                # Handle complex content (images + text)
+                parts = []
+                
                 if isinstance(content, list):
                     for item in content:
-                        if isinstance(item, dict) and item.get("type") == "text":
-                            text_content += item.get("text", "")
+                        if isinstance(item, dict):
+                            if item.get("type") == "text":
+                                parts.append(types.Part(text=item.get("text", "")))
+                            elif item.get("type") == "image_url":
+                                # Handle image URLs - convert to bytes for Gemini
+                                image_url = item.get("image_url", {}).get("url", "")
+                                if image_url:
+                                    try:
+                                        image_part = _convert_image_url_to_part(image_url)
+                                        if image_part:
+                                            parts.append(image_part)
+                                    except Exception as e:
+                                        print(f"Error processing image for Gemini: {e}")
+                                        # Skip the image and continue
                 else:
+                    # Fallback for non-list content
                     text_content = str(content)
-                contents.append(types.Content(role="user", parts=[types.Part(text=text_content)]))
+                    parts.append(types.Part(text=text_content))
+                
+                # Only add if we have parts
+                if parts:
+                    contents.append(types.Content(role="user", parts=parts))
+                else:
+                    contents.append(types.Content(role="user", parts=[types.Part(text="")]))
         elif role == "assistant":
             # Convert assistant to model role
             if isinstance(content, str):
@@ -310,8 +372,24 @@ def convert_messages_for_model(model, messages, image_detail="low"):
             anthropic_messages.insert(0, {"role": "user", "content": "<no message>"})
         return anthropic_messages, system_content
     elif model in GOOGLE_MODELS:
-        # For Google models, just return the messages unchanged - we'll handle conversion later
-        return messages, None
+        # For Google vision models, convert to the expected format with image URLs
+        if model in GOOGLE_VISION_MODELS and image_detail != "none":
+            new_messages = []
+            for message in messages:
+                if message["role"] == "user" and "content" in message:
+                    # Get local images for this message
+                    local_images = message.get("local_images", [])
+                    # Check for image URLs and local images, create message with content array
+                    message_with_images = parse_and_create_image_messages(message["content"], image_detail, local_images)
+                    new_messages.append(message_with_images)
+                else:
+                    # System or assistant messages are added unchanged (remove local_images field if present)
+                    clean_message = {k: v for k, v in message.items() if k != "local_images"}
+                    new_messages.append(clean_message)
+            return new_messages, None
+        else:
+            # For non-vision Google models, just return messages unchanged
+            return messages, None
     # Clean up local_images field for non-vision models
     clean_messages = []
     for message in messages:

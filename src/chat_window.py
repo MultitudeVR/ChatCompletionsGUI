@@ -20,7 +20,7 @@ from PIL import Image, ImageGrab
 from tooltip import ToolTip
 from constants import OPENAI_VISION_MODELS, OPENAI_REASONING_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS, \
     SYSTEM_MESSAGE_DEFAULT_TEXT, DEFAULT_FILE_NAMING_MODEL, MODEL_INFO, \
-    HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE, ANTHROPIC_VISION_MODELS, GPT5_MODELS
+    HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE, ANTHROPIC_VISION_MODELS, GOOGLE_VISION_MODELS, GPT5_MODELS
 from prompts import file_naming_prompt
 from utils import convert_messages_for_model, convert_messages_for_google, parse_and_create_image_messages, count_tokens, convert_text_to_tokens, convert_tokens_to_text
 from custom_server import CustomServer
@@ -826,7 +826,9 @@ class ChatWindow:
         self.add_message("user" if len(self.chat_history) == 0 or self.chat_history[-1]["role"].get() == "assistant" else "assistant", "")
 
     def update_image_detail_visibility(self, *args):
-        if self.model_var.get() in OPENAI_VISION_MODELS or self.model_var.get() in ANTHROPIC_VISION_MODELS:
+        if (self.model_var.get() in OPENAI_VISION_MODELS or 
+            self.model_var.get() in ANTHROPIC_VISION_MODELS or 
+            self.model_var.get() in GOOGLE_VISION_MODELS):
             self.image_detail_dropdown.grid(row=0, column=8, sticky="ne")
         else:
             self.image_detail_dropdown.grid_remove()
@@ -928,7 +930,8 @@ class ChatWindow:
         total_cost = input_cost + output_cost
         cost_message = f"Input Cost: ${input_cost:.5f}\nOutput Cost: ${output_cost:.5f}"
 
-        if (model in OPENAI_VISION_MODELS or model in ANTHROPIC_VISION_MODELS) and self.image_detail_var.get() != "none":
+        if ((model in OPENAI_VISION_MODELS or model in ANTHROPIC_VISION_MODELS or model in GOOGLE_VISION_MODELS) 
+            and self.image_detail_var.get() != "none"):
             # Count the number of images in the messages
             num_images = 0
             for message in messages:
@@ -1280,7 +1283,7 @@ class ChatWindow:
         
         # First try image paste if we're in a vision-capable context
         current_model = self.model_var.get()
-        if (current_model in OPENAI_VISION_MODELS or current_model in ANTHROPIC_VISION_MODELS) and self.image_detail_var.get() != "none":
+        if (current_model in OPENAI_VISION_MODELS or current_model in ANTHROPIC_VISION_MODELS or current_model in GOOGLE_VISION_MODELS) and self.image_detail_var.get() != "none":
             if self.try_image_paste(widget):
                 return "break"
         

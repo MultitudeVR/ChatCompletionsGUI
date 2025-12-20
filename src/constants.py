@@ -57,7 +57,14 @@ GOOGLE_MODELS = [
     "gemini-1.5-pro",
     "gemini-1.5-flash",
     "gemini-pro",
-    # "gemini-pro-vision", # TODO: Add support for gemini vision models
+]
+GOOGLE_VISION_MODELS = [
+    "gemini-2.0-flash",
+    "gemini-1.5-pro-latest",
+    "gemini-1.5-flash-latest", 
+    "gemini-1.5-pro",
+    "gemini-1.5-flash",
+    # "gemini-pro" doesn't support images, only text
 ]
 OPENAI_VISION_MODELS = [
     "gpt-5.2",
