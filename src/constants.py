@@ -2,6 +2,8 @@
 SYSTEM_MESSAGE_DEFAULT_TEXT = ""
 DEFAULT_FILE_NAMING_MODEL="gpt-4o-mini" # if empty, won't name files automatically
 OPENAI_MODELS = [
+    "gpt-5.2",
+    "gpt-5.1",
     "gpt-5",
     "gpt-5-mini",
     "gpt-5-nano",
@@ -54,7 +56,9 @@ GOOGLE_MODELS = [
     # "gemini-pro-vision", # TODO: Add support for gemini vision models
 ]
 OPENAI_VISION_MODELS = [
-    'gpt-5',
+    "gpt-5.2",
+    "gpt-5.1",
+    "gpt-5",
     'gpt-5-mini',
     'gpt-5-nano',
     'gpt-4.1',
@@ -92,11 +96,15 @@ ANTHROPIC_VISION_MODELS = [
     'claude-3-opus-20240229',
 ]
 GPT5_MODELS = [
-    'gpt-5',
-    'gpt-5-mini',
-    'gpt-5-nano',
+    "gpt-5.2",
+    "gpt-5.1",
+    "gpt-5",
+    "gpt-5-mini",
+    "gpt-5-nano",
 ]
 MODEL_INFO = {
+    "gpt-5.2": {"max_tokens": 128000, "input_price": 0.00125, "output_price": 0.01},
+    "gpt-5.1": {"max_tokens": 128000, "input_price": 0.00125, "output_price": 0.01},
     "gpt-5": {"max_tokens": 128000, "input_price": 0.00125, "output_price": 0.01},
     "gpt-5-mini": {"max_tokens": 128000, "input_price": 0.00025, "output_price": 0.002},
     "gpt-5-nano": {"max_tokens": 128000, "input_price": 0.00005, "output_price": 0.0004},

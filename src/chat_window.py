@@ -433,7 +433,8 @@ class ChatWindow:
                 elif self.model_var.get() in GPT5_MODELS:
                     response = streaming_client.chat.completions.create(model=self.model_var.get(),
                         messages=messages,
-                        stream=True)
+                        stream=True,
+                        reasoning_effort= "low" if self.model_var.get() in ["gpt-5", "gpt-5-mini", "gpt-5-nano"] else "none")
                 else:
                     response = streaming_client.chat.completions.create(model=self.model_var.get(),
                         messages=messages,
