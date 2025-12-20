@@ -22,7 +22,7 @@ from constants import OPENAI_VISION_MODELS, OPENAI_REASONING_MODELS, OPENAI_MODE
     SYSTEM_MESSAGE_DEFAULT_TEXT, DEFAULT_FILE_NAMING_MODEL, MODEL_INFO, \
     HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE, ANTHROPIC_VISION_MODELS, GPT5_MODELS
 from prompts import file_naming_prompt
-from utils import convert_messages_for_model, parse_and_create_image_messages, count_tokens, convert_text_to_tokens, convert_tokens_to_text
+from utils import convert_messages_for_model, convert_messages_for_google, parse_and_create_image_messages, count_tokens, convert_text_to_tokens, convert_tokens_to_text
 from custom_server import CustomServer
 
 class ChatWindow:
@@ -280,13 +280,15 @@ class ChatWindow:
             self.google_apikey_var.trace("w", self.on_config_changed)
         if self.google_apikey_var.get():
             try:
-                import google.generativeai as genai
+                from google import genai
             except:
-                error_message = "WARNING: Google GenerativeAI API not installed. If you wish to use Google Gemini models, install the 'google-generativeai' package with the `pip install google-generativeai` command."
-                # self.show_error_popup(error_message)
+                error_message = "WARNING: Google GenAI SDK not installed. If you wish to use Google Gemini models, install the 'google-genai' package with the `pip install google-genai` command."
                 print(error_message)
+                self.google_client = None
                 return
-            genai.configure(api_key=self.google_apikey_var.get())
+            self.google_client = genai.Client(api_key=self.google_apikey_var.get())
+        else:
+            self.google_client = None
     
     def clear_chat_history(self):
         for row in reversed(range(len(self.chat_history))):
@@ -400,7 +402,8 @@ class ChatWindow:
             if model_name in ANTHROPIC_MODELS:
                 self.stream_anthropic_model_output(messages, anthropic_system_message)
             elif model_name in GOOGLE_MODELS:
-                self.stream_google_model_output(messages)
+                google_contents, google_config = convert_messages_for_google(messages)
+                self.stream_google_model_output(google_contents, google_config)
             else:
                 self.stream_openai_model_output(messages)
             
@@ -504,37 +507,53 @@ class ChatWindow:
         asyncio.set_event_loop(loop)
         loop.run_until_complete(streaming_anthropic_chat_completion())
 
-    def stream_google_model_output(self, messages):
-        if self.config.get("google", "api_key", fallback="") == "":
+    def stream_google_model_output(self, contents, config=None):
+        if self.google_client is None:
             error_message = "Google API key is not configured. Please configure it in the settings."
             self.show_error_and_open_settings(error_message)
             return
-        try:
-            import google.generativeai as genai
-        except:
-            error_message = "Google GenerativeAI API not installed. If you wish to use Google Gemini models, install the 'google-generativeai' package with the `pip install google-generativeai` command."
-            self.show_error_popup(error_message)
-            return
         async def streaming_google_chat_completion():
             try:
-                google_model = genai.GenerativeModel(self.model_var.get(), 
-                                    generation_config={"temperature": self.temperature_var.get(), 
-                                                        "max_output_tokens": self.max_length_var.get()})
-                response = google_model.generate_content(messages, stream=True)
-            except Exception as e:
-                error_message = "Error: " + str(e)
-                self.show_error_popup(error_message)
-                return
-            try:
-                for chunk in response:
-                    self.app.after(0, self.add_to_last_message, chunk.parts[0].text)
+                from google.genai import types
+                
+                
+                # Create or update config with temperature and max_tokens
+                if config is None:
+                    generation_config = types.GenerateContentConfig(
+                        temperature=self.temperature_var.get(),
+                        max_output_tokens=self.max_length_var.get()
+                    )
+                else:
+                    # Update existing config with our parameters
+                    config.temperature = self.temperature_var.get()
+                    config.max_output_tokens = self.max_length_var.get()
+                    generation_config = config
+                
+                # Stream the response
+                for chunk in self.google_client.models.generate_content_stream(
+                    model=self.model_var.get(),
+                    contents=contents,
+                    config=generation_config
+                ):
+                    if chunk.text:
+                        self.app.after(0, self.add_to_last_message, chunk.text)
                     if self.is_streaming_cancelled:
                         break
-            except Exception as e:
-                error_message = f"An unexpected error occurred: {e}"
+            except ImportError as e:
+                error_message = "Google GenAI SDK not properly installed. Please install with: pip install google-genai"
                 loop.call_soon_threadsafe(self.show_error_popup, error_message)
-            finally:
-                response.resolve()
+                return
+            except Exception as e:
+                if "API_KEY_INVALID" in str(e) or "authentication" in str(e).lower():
+                    error_message = "Google API key is invalid. Please check your API key in settings."
+                elif "quota" in str(e).lower() or "rate" in str(e).lower():
+                    error_message = f"Google API quota exceeded or rate limited: {e}"
+                elif "model" in str(e).lower() and "not found" in str(e).lower():
+                    error_message = f"Google model '{self.model_var.get()}' not available. Please select a different model."
+                else:
+                    error_message = f"Google API error: {e}"
+                loop.call_soon_threadsafe(self.show_error_popup, error_message)
+                return
             if not self.is_streaming_cancelled:
                 self.app.after(0, self.add_empty_user_message)
         loop = asyncio.new_event_loop()
@@ -568,7 +587,7 @@ class ChatWindow:
         # Update the model dropdown menu with available models
         current_model = self.model_var.get()
         anthropic_models = ANTHROPIC_MODELS if "anthropic" in sys.modules and self.anthropic_apikey_var.get() else []
-        google_models = GOOGLE_MODELS if "google.generativeai" in sys.modules and self.google_apikey_var.get() else []
+        google_models = GOOGLE_MODELS if self.google_client is not None else []
         openai_models = OPENAI_MODELS if "openai" in sys.modules and self.openai_apikey_var.get() else []
         custom_models = [model for server in self.custom_servers for model in server.models]
         possible_models = [*openai_models, *anthropic_models, *google_models, *custom_models]

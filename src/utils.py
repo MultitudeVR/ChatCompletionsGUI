@@ -126,6 +126,101 @@ def parse_and_create_image_messages_legacy(content, image_detail):
     """Legacy function for backwards compatibility"""
     return parse_and_create_image_messages(content, image_detail)
 
+def convert_messages_for_google(messages):
+    """Convert messages to Google GenAI format using proper types"""
+    try:
+        from google.genai import types
+    except ImportError:
+        # Fallback to dict format if types not available
+        return _convert_messages_for_google_dict(messages)
+    
+    system_texts = []
+    contents = []
+    
+    for message in messages:
+        role = message["role"]
+        content = message.get("content", "")
+        
+        if role == "system":
+            system_texts.append(content)
+        elif role == "user":
+            # Handle text content
+            if isinstance(content, str):
+                contents.append(types.Content(role="user", parts=[types.Part(text=content)]))
+            else:
+                # Handle complex content (images, etc.) - extract text for now
+                text_content = ""
+                if isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            text_content += item.get("text", "")
+                else:
+                    text_content = str(content)
+                contents.append(types.Content(role="user", parts=[types.Part(text=text_content)]))
+        elif role == "assistant":
+            # Convert assistant to model role
+            if isinstance(content, str):
+                contents.append(types.Content(role="model", parts=[types.Part(text=content)]))
+            else:
+                # Handle complex content - extract text for now
+                text_content = ""
+                if isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            text_content += item.get("text", "")
+                else:
+                    text_content = str(content)
+                contents.append(types.Content(role="model", parts=[types.Part(text=text_content)]))
+    
+    # Create config with system instruction if we have system messages
+    config = None
+    if system_texts:
+        system_instruction = "\n".join(system_texts)
+        config = types.GenerateContentConfig(system_instruction=system_instruction)
+    
+    return contents, config
+
+def _convert_messages_for_google_dict(messages):
+    """Fallback conversion to dict format"""
+    google_messages = []
+    
+    for message in messages:
+        role = message["role"]
+        content = message.get("content", "")
+        
+        # Skip system messages for fallback
+        if role == "system":
+            continue
+            
+        # Convert role names
+        if role == "assistant":
+            role = "model"
+        elif role == "user":
+            role = "user"
+        
+        # Convert content to Google format
+        if isinstance(content, str):
+            google_messages.append({
+                "role": role,
+                "parts": [{"text": content}]
+            })
+        else:
+            # Handle complex content - extract text
+            text_content = ""
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        text_content += item.get("text", "")
+            else:
+                text_content = str(content)
+            
+            google_messages.append({
+                "role": role,
+                "parts": [{"text": text_content}]
+            })
+    
+    return google_messages, None
+
 def convert_messages_for_model(model, messages, image_detail="low"):
     if model in OPENAI_REASONING_MODELS:
         # Update the messages to not include the system role (unsupported in OpenAI's reasoning models)
@@ -215,24 +310,8 @@ def convert_messages_for_model(model, messages, image_detail="low"):
             anthropic_messages.insert(0, {"role": "user", "content": "<no message>"})
         return anthropic_messages, system_content
     elif model in GOOGLE_MODELS:
-        # Google API also has a bunch of extra requirements not present in OpenAI's API
-        roles_mapping = {"user": "user", "assistant": "model", "system": "model"}
-        google_messages = []
-        for message in messages:
-            if not message["content"]:
-                continue
-            if message["role"] == "system":
-                google_messages.append({"role": "model", "parts": ["SYSTEM_PROMPT: " + message["content"]]})
-            else:
-                google_messages.append({"role": roles_mapping[message["role"]], "parts": [message["content"]]})
-        if len(google_messages) == 0 or google_messages[0]["role"] == "model":
-            google_messages.insert(0, {"role": "user", "parts": ["<no message>"]})
-        for i in range(len(google_messages) - 1, 0, -1):
-            if google_messages[i]["role"] == google_messages[i - 1]["role"]:
-                google_messages.insert(i, {"role": "user" if google_messages[i]["role"] == "model" else "model", "parts": ["<no message>"]})
-        if google_messages[-1]["role"] == "model":
-            google_messages.append({"role": "user", "parts": ["<no message>"]})
-        return google_messages, None
+        # For Google models, just return the messages unchanged - we'll handle conversion later
+        return messages, None
     # Clean up local_images field for non-vision models
     clean_messages = []
     for message in messages:

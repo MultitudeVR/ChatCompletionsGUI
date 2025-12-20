@@ -51,7 +51,11 @@ ANTHROPIC_MODELS = [
     "claude-3-opus-20240229"
 ]
 GOOGLE_MODELS = [
+    "gemini-2.0-flash",
     "gemini-1.5-pro-latest",
+    "gemini-1.5-flash-latest", 
+    "gemini-1.5-pro",
+    "gemini-1.5-flash",
     "gemini-pro",
     # "gemini-pro-vision", # TODO: Add support for gemini vision models
 ]
