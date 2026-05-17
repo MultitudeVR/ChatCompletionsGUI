@@ -21,7 +21,7 @@ from tooltip import ToolTip
 from constants import OPENAI_VISION_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS, \
     SYSTEM_MESSAGE_DEFAULT_TEXT, DEFAULT_FILE_NAMING_MODEL, MODEL_INFO, \
     HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE, ANTHROPIC_VISION_MODELS, GOOGLE_VISION_MODELS, \
-    OPENAI_REASONING_EFFORTS, OPENAI_NON_STREAMING_MODELS
+    OPENAI_REASONING_EFFORTS, OPENAI_RESPONSES_MODELS
 from prompts import file_naming_prompt
 from utils import convert_messages_for_model, convert_messages_for_google, parse_and_create_image_messages, count_tokens, convert_text_to_tokens, convert_tokens_to_text
 from custom_server import CustomServer
@@ -407,6 +407,55 @@ class ChatWindow:
         self.set_submit_button(False)
         Thread(target=request_thread).start()
 
+    def convert_messages_for_responses_api(self, messages):
+        responses_input = []
+        for message in messages:
+            role = message.get("role", "user")
+            if role == "system":
+                role = "developer"
+
+            content = message.get("content", "")
+            local_images = message.get("local_images", [])
+            if (
+                role == "user"
+                and self.image_detail_var.get() != "none"
+                and self.model_var.get() in OPENAI_VISION_MODELS
+            ):
+                content = parse_and_create_image_messages(content, self.image_detail_var.get(), local_images)["content"]
+
+            if isinstance(content, list):
+                response_content = []
+                for item in content:
+                    if item.get("type") == "text":
+                        response_content.append({"type": "input_text", "text": item.get("text", "")})
+                    elif item.get("type") == "image_url":
+                        image_url = item.get("image_url", {})
+                        response_content.append({
+                            "type": "input_image",
+                            "image_url": image_url.get("url", ""),
+                            "detail": image_url.get("detail", self.image_detail_var.get())
+                        })
+            else:
+                response_content = [{"type": "input_text", "text": str(content)}]
+
+            responses_input.append({"role": role, "content": response_content})
+
+        return responses_input
+
+    def get_text_from_responses_api_response(self, response):
+        output_text = getattr(response, "output_text", None)
+        if output_text:
+            return output_text
+
+        text_parts = []
+        for output_item in getattr(response, "output", []) or []:
+            for content_item in getattr(output_item, "content", []) or []:
+                text = getattr(content_item, "text", None)
+                if text:
+                    text_parts.append(text)
+
+        return "".join(text_parts)
+
     def stream_openai_model_output(self, messages):
         async def streaming_chat_completion():
             if self.model_var.get() in OPENAI_MODELS:
@@ -424,14 +473,14 @@ class ChatWindow:
                     self.show_error_popup(error_message)
                     return
             try:
-                if self.model_var.get() in OPENAI_NON_STREAMING_MODELS:
+                if self.model_var.get() in OPENAI_RESPONSES_MODELS:
                     self.ensure_valid_reasoning_effort()
-                    completion = await streaming_client.chat.completions.create(
+                    response = await streaming_client.responses.create(
                         model=self.model_var.get(),
-                        messages=messages,
-                        max_completion_tokens=self.max_length_var.get(),
-                        reasoning_effort=self.reasoning_effort_var.get())
-                    content = completion.choices[0].message.content
+                        input=self.convert_messages_for_responses_api(messages),
+                        max_output_tokens=self.max_length_var.get(),
+                        reasoning={"effort": self.reasoning_effort_var.get()})
+                    content = self.get_text_from_responses_api_response(response)
                     if content:
                         self.app.after(0, self.add_to_last_message, content)
                     if not self.is_streaming_cancelled:

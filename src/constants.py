@@ -11,6 +11,7 @@ OPENAI_MODELS = [
     "gpt-5.2",
     "gpt-5.2-pro",
     "gpt-5.1",
+    "gpt-5-pro",
     "gpt-5",
     "gpt-5-mini",
     "gpt-5-nano",
@@ -93,6 +94,7 @@ OPENAI_VISION_MODELS = [
     "gpt-5.2",
     "gpt-5.2-pro",
     "gpt-5.1",
+    "gpt-5-pro",
     "gpt-5",
     'gpt-5-mini',
     'gpt-5-nano',
@@ -120,6 +122,7 @@ OPENAI_REASONING_MODELS = [
     "gpt-5.2",
     "gpt-5.2-pro",
     "gpt-5.1",
+    "gpt-5-pro",
     "gpt-5",
     "gpt-5-mini",
     "gpt-5-nano",
@@ -152,6 +155,7 @@ GPT5_MODELS = [
     "gpt-5.2",
     "gpt-5.2-pro",
     "gpt-5.1",
+    "gpt-5-pro",
     "gpt-5",
     "gpt-5-mini",
     "gpt-5-nano",
@@ -166,6 +170,7 @@ OPENAI_REASONING_EFFORTS = {
     "gpt-5.2": ["none", "low", "medium", "high", "xhigh"],
     "gpt-5.2-pro": ["medium", "high", "xhigh"],
     "gpt-5.1": ["none", "low", "medium", "high"],
+    "gpt-5-pro": ["high"],
     "gpt-5": ["minimal", "low", "medium", "high"],
     "gpt-5-mini": ["minimal", "low", "medium", "high"],
     "gpt-5-nano": ["minimal", "low", "medium", "high"],
@@ -173,8 +178,11 @@ OPENAI_REASONING_EFFORTS = {
     "o3-mini": ["low", "medium", "high"],
     "o4-mini": ["low", "medium", "high"],
 }
-OPENAI_NON_STREAMING_MODELS = [
+OPENAI_RESPONSES_MODELS = [
     "gpt-5.5-pro",
+    "gpt-5.4-pro",
+    "gpt-5.2-pro",
+    "gpt-5-pro",
 ]
 MODEL_INFO = {
     "gpt-5.5": {"max_tokens": 1050000, "input_price": 0.005, "output_price": 0.03},
@@ -186,6 +194,7 @@ MODEL_INFO = {
     "gpt-5.2": {"max_tokens": 400000, "input_price": 0.00175, "output_price": 0.014},
     "gpt-5.2-pro": {"max_tokens": 400000, "input_price": 0.021, "output_price": 0.168},
     "gpt-5.1": {"max_tokens": 128000, "input_price": 0.00125, "output_price": 0.01},
+    "gpt-5-pro": {"max_tokens": 400000, "input_price": 0.015, "output_price": 0.12},
     "gpt-5": {"max_tokens": 128000, "input_price": 0.00125, "output_price": 0.01},
     "gpt-5-mini": {"max_tokens": 128000, "input_price": 0.00025, "output_price": 0.002},
     "gpt-5-nano": {"max_tokens": 128000, "input_price": 0.00005, "output_price": 0.0004},
