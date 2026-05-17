@@ -18,9 +18,10 @@ from io import BytesIO
 import mimetypes
 from PIL import Image, ImageGrab, ImageTk
 from tooltip import ToolTip
-from constants import OPENAI_VISION_MODELS, OPENAI_REASONING_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS, \
+from constants import OPENAI_VISION_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS, \
     SYSTEM_MESSAGE_DEFAULT_TEXT, DEFAULT_FILE_NAMING_MODEL, MODEL_INFO, \
-    HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE, ANTHROPIC_VISION_MODELS, GOOGLE_VISION_MODELS, GPT5_MODELS
+    HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE, ANTHROPIC_VISION_MODELS, GOOGLE_VISION_MODELS, \
+    OPENAI_REASONING_EFFORTS, OPENAI_NON_STREAMING_MODELS
 from prompts import file_naming_prompt
 from utils import convert_messages_for_model, convert_messages_for_google, parse_and_create_image_messages, count_tokens, convert_text_to_tokens, convert_tokens_to_text
 from custom_server import CustomServer
@@ -38,6 +39,8 @@ class ChatWindow:
 
         self.settings_window = None
         self.settings_frame = None
+        self.model_settings_window = None
+        self.model_settings_frame = None
         
         # Initialize image storage with unique directory per window instance
         import uuid
@@ -98,32 +101,23 @@ class ChatWindow:
         ttk.Label(self.main_frame, text="Model:").grid(row=0, column=6, sticky="ne", pady=(0, 40))
         self.update_models_dropdown()
 
-        # Add sliders for temperature, max length, and top p
+        # Model request settings are edited from the cog next to the model picker.
         last_used_temperature = self.config.get("app", "last_used_temperature", fallback="0.7")
         self.temperature_var = tk.DoubleVar(value=last_used_temperature)
-        ttk.Label(self.main_frame, text="Temperature:").grid(row=0, column=6, sticky="ne", pady=(30, 0))
-        self.temperature_scale = ttk.Scale(self.main_frame, variable=self.temperature_var, from_=0, to=1, orient="horizontal")
-        self.temperature_scale.grid(row=0, column=7, sticky="nw", pady=(30, 0))
 
-        self.max_length_var = tk.IntVar(value=4000)
-        ttk.Label(self.main_frame, text="Max Length:").grid(row=0, column=6, sticky="ne", pady=(60, 0))
-        self.max_length_scale = ttk.Scale(self.main_frame, variable=self.max_length_var, from_=1, to=8000, orient="horizontal")
-        self.max_length_scale.grid(row=0, column=7, sticky="nw", pady=(60, 0))
+        last_used_max_length = self.config.get("app", "last_used_max_length", fallback="4000")
+        self.max_length_var = tk.IntVar(value=last_used_max_length)
 
-        # Add Entry widgets for temperature and max length
         self.temp_entry_var = tk.StringVar()
-        self.temp_entry = ttk.Entry(self.main_frame, textvariable=self.temp_entry_var, width=5)
-        self.temp_entry.grid(row=0, column=8, sticky="nw", pady=(30, 0))
         self.temp_entry_var.set(self.temperature_var.get())
         self.temperature_var.trace("w", lambda *args: self.temp_entry_var.set(f"{self.temperature_var.get():.2f}"))
         self.temp_entry_var.trace("w", self.on_temp_entry_change)
 
         self.max_len_entry_var = tk.StringVar()
-        self.max_len_entry = ttk.Entry(self.main_frame, textvariable=self.max_len_entry_var, width=5)
-        self.max_len_entry.grid(row=0, column=8, sticky="nw", pady=(60, 0))
         self.max_len_entry_var.set(self.max_length_var.get())
         self.max_length_var.trace("w", lambda *args: self.max_len_entry_var.set(self.max_length_var.get()))
         self.max_len_entry_var.trace("w", self.on_max_len_entry_change)
+        self.reasoning_effort_var = tk.StringVar(value=self.config.get("app", "last_used_reasoning_effort", fallback="none"))
 
         # Chat frame and scrollbar
         self.chat_history = []
@@ -183,14 +177,10 @@ class ChatWindow:
         self.save_button = ttk.Button(self.configuration_frame, text="Save Chat", command=self.save_chat_history)
         self.save_button.grid(row=config_row, column=3, sticky="w")
 
-        # Add image detail dropdown
-        self.image_detail_var = tk.StringVar(value="low")
-        self.image_detail_dropdown = ttk.OptionMenu(self.main_frame, self.image_detail_var, "low", "none", "low", "high")
-        self.image_detail_dropdown.grid(row=0, column=8, sticky="ne")
-        self.update_image_detail_visibility()
+        self.image_detail_var = tk.StringVar(value=self.config.get("app", "last_used_image_detail", fallback="low"))
 
         # Update image detail visibility based on selected model
-        self.model_var.trace("w", self.update_image_detail_visibility)
+        self.model_var.trace("w", self.update_model_settings_visibility)
         # Create the hamburger menu button and bind it to the show_popup function
         self.hamburger_button = ttk.Button(self.configuration_frame, text="≡", command=self.toggle_settings_window)
         self.hamburger_button.grid(row=config_row, column=9, padx=10, pady=10, sticky="w")
@@ -434,16 +424,28 @@ class ChatWindow:
                     self.show_error_popup(error_message)
                     return
             try:
-                if self.model_var.get() in OPENAI_REASONING_MODELS:
-                    response = streaming_client.chat.completions.create(model=self.model_var.get(),
+                if self.model_var.get() in OPENAI_NON_STREAMING_MODELS:
+                    self.ensure_valid_reasoning_effort()
+                    completion = await streaming_client.chat.completions.create(
+                        model=self.model_var.get(),
                         messages=messages,
-                        temperature=1,
+                        max_completion_tokens=self.max_length_var.get(),
+                        reasoning_effort=self.reasoning_effort_var.get())
+                    content = completion.choices[0].message.content
+                    if content:
+                        self.app.after(0, self.add_to_last_message, content)
+                    if not self.is_streaming_cancelled:
+                        self.app.after(0, self.add_empty_user_message)
+                    return
+
+                if self.model_var.get() in OPENAI_REASONING_EFFORTS:
+                    self.ensure_valid_reasoning_effort()
+                    response = streaming_client.chat.completions.create(
+                        model=self.model_var.get(),
+                        messages=messages,
+                        max_completion_tokens=self.max_length_var.get(),
+                        reasoning_effort=self.reasoning_effort_var.get(),
                         stream=True)
-                elif self.model_var.get() in GPT5_MODELS:
-                    response = streaming_client.chat.completions.create(model=self.model_var.get(),
-                        messages=messages,
-                        stream=True,
-                        reasoning_effort= "low" if self.model_var.get() in ["gpt-5", "gpt-5-mini", "gpt-5-nano"] else "none")
                 else:
                     response = streaming_client.chat.completions.create(model=self.model_var.get(),
                         messages=messages,
@@ -597,9 +599,17 @@ class ChatWindow:
         openai_models = OPENAI_MODELS if "openai" in sys.modules and self.openai_apikey_var.get() else []
         custom_models = [model for server in self.custom_servers for model in server.models]
         possible_models = [*openai_models, *anthropic_models, *google_models, *custom_models]
-        ttk.OptionMenu(self.main_frame, self.model_var, current_model, *possible_models).grid(row=0, column=7, sticky="nw")
+        if hasattr(self, "model_dropdown"):
+            self.model_dropdown.destroy()
+        if hasattr(self, "model_settings_button"):
+            self.model_settings_button.destroy()
+        self.model_dropdown = ttk.OptionMenu(self.main_frame, self.model_var, current_model, *possible_models)
+        self.model_dropdown.grid(row=0, column=7, sticky="nw")
+        self.model_settings_button = ttk.Button(self.main_frame, text="⚙", width=3, command=self.toggle_model_settings_window)
+        self.model_settings_button.grid(row=0, column=8, sticky="nw", padx=(4, 0))
+        ToolTip(self.model_settings_button, "Model settings")
         # add separators to the dropdown menu
-        dropdown_menu = self.main_frame.winfo_children()[len(self.main_frame.children)-1]['menu']
+        dropdown_menu = self.model_dropdown['menu']
         sep = -1
         if openai_models:
             sep+=len(openai_models)+1
@@ -833,13 +843,84 @@ class ChatWindow:
     def add_message_via_button(self):
         self.add_message("user" if len(self.chat_history) == 0 or self.chat_history[-1]["role"].get() == "assistant" else "assistant", "")
 
-    def update_image_detail_visibility(self, *args):
-        if (self.model_var.get() in OPENAI_VISION_MODELS or 
-            self.model_var.get() in ANTHROPIC_VISION_MODELS or 
-            self.model_var.get() in GOOGLE_VISION_MODELS):
-            self.image_detail_dropdown.grid(row=0, column=8, sticky="ne")
-        else:
-            self.image_detail_dropdown.grid_remove()
+    def update_model_settings_visibility(self, *args):
+        self.ensure_valid_reasoning_effort()
+        if self.model_settings_window is not None:
+            self.refresh_model_settings_window()
+
+    def model_supports_image_detail(self):
+        model = self.model_var.get()
+        return model in OPENAI_VISION_MODELS or model in ANTHROPIC_VISION_MODELS or model in GOOGLE_VISION_MODELS
+
+    def ensure_valid_reasoning_effort(self):
+        efforts = OPENAI_REASONING_EFFORTS.get(self.model_var.get())
+        if not efforts:
+            return
+
+        if self.reasoning_effort_var.get() not in efforts:
+            self.reasoning_effort_var.set("none" if "none" in efforts else efforts[0])
+
+    def toggle_model_settings_window(self):
+        if self.model_settings_window is not None:
+            self.close_model_settings_window()
+            return
+
+        self.model_settings_window = tk.Toplevel(self.app)
+        self.model_settings_window.title("Model Settings")
+        self.model_settings_frame = ttk.Frame(self.model_settings_window, padding="10")
+        self.model_settings_frame.grid(row=0, column=0, sticky="nsew")
+        self.model_settings_window.columnconfigure(0, weight=1)
+        self.model_settings_window.rowconfigure(0, weight=1)
+        self.refresh_model_settings_window()
+        self.model_settings_window.protocol("WM_DELETE_WINDOW", self.close_model_settings_window)
+        self.center_popup_over_chat_window(self.model_settings_window, self.app, 0, -80)
+        self.model_settings_window.focus_force()
+
+    def refresh_model_settings_window(self):
+        if self.model_settings_frame is None:
+            return
+
+        for widget in self.model_settings_frame.winfo_children():
+            widget.destroy()
+
+        self.ensure_valid_reasoning_effort()
+        model = self.model_var.get()
+
+        ttk.Label(self.model_settings_frame, text="Model:").grid(row=0, column=0, sticky="e", padx=(0, 8), pady=4)
+        ttk.Label(self.model_settings_frame, text=model).grid(row=0, column=1, sticky="w", pady=4)
+
+        ttk.Label(self.model_settings_frame, text="Temperature:").grid(row=1, column=0, sticky="e", padx=(0, 8), pady=4)
+        ttk.Scale(self.model_settings_frame, variable=self.temperature_var, from_=0, to=1, orient="horizontal").grid(row=1, column=1, sticky="we", pady=4)
+        ttk.Entry(self.model_settings_frame, textvariable=self.temp_entry_var, width=7).grid(row=1, column=2, sticky="w", padx=(8, 0), pady=4)
+
+        ttk.Label(self.model_settings_frame, text="Max length:").grid(row=2, column=0, sticky="e", padx=(0, 8), pady=4)
+        ttk.Scale(self.model_settings_frame, variable=self.max_length_var, from_=1, to=128000, orient="horizontal").grid(row=2, column=1, sticky="we", pady=4)
+        ttk.Entry(self.model_settings_frame, textvariable=self.max_len_entry_var, width=7).grid(row=2, column=2, sticky="w", padx=(8, 0), pady=4)
+
+        row = 3
+        if self.model_supports_image_detail():
+            ttk.Label(self.model_settings_frame, text="Image quality:").grid(row=row, column=0, sticky="e", padx=(0, 8), pady=4)
+            ttk.OptionMenu(self.model_settings_frame, self.image_detail_var, self.image_detail_var.get(), "none", "low", "high").grid(row=row, column=1, sticky="w", pady=4)
+            row += 1
+
+        reasoning_efforts = OPENAI_REASONING_EFFORTS.get(model)
+        if reasoning_efforts:
+            ttk.Label(self.model_settings_frame, text="Reasoning:").grid(row=row, column=0, sticky="e", padx=(0, 8), pady=4)
+            ttk.OptionMenu(self.model_settings_frame, self.reasoning_effort_var, self.reasoning_effort_var.get(), *reasoning_efforts).grid(row=row, column=1, sticky="w", pady=4)
+            reasoning_hint = "none = instant" if "none" in reasoning_efforts else f"lowest = {reasoning_efforts[0]}"
+            ttk.Label(self.model_settings_frame, text=reasoning_hint).grid(row=row, column=2, sticky="w", padx=(8, 0), pady=4)
+            row += 1
+
+        close_button = ttk.Button(self.model_settings_frame, text="Close", command=self.close_model_settings_window)
+        close_button.grid(row=row, column=0, columnspan=3, pady=(10, 0))
+        self.model_settings_frame.columnconfigure(1, weight=1)
+        self.toggle_dark_mode()
+
+    def close_model_settings_window(self):
+        if self.model_settings_window is not None:
+            self.model_settings_window.destroy()
+            self.model_settings_window = None
+            self.model_settings_frame = None
 
     def handle_image_placeholder_motion(self, event, widget):
         placeholder = self.get_image_placeholder_at_position(widget, event.x, event.y)
@@ -945,7 +1026,7 @@ class ChatWindow:
     def on_max_len_entry_change(self, *args):
         try:
             value = int(self.max_len_entry_var.get())
-            if 1 <= value <= 8000:
+            if 1 <= value <= 128000:
                self.max_length_var.set(value)
             else:
                 raise ValueError
@@ -988,6 +1069,9 @@ class ChatWindow:
         self.config.read("config.ini")
         self.config.set("app", "last_used_model", self.model_var.get())
         self.config.set("app", "last_used_temperature", str(self.temperature_var.get()))
+        self.config.set("app", "last_used_max_length", str(self.max_length_var.get()))
+        self.config.set("app", "last_used_image_detail", self.image_detail_var.get())
+        self.config.set("app", "last_used_reasoning_effort", self.reasoning_effort_var.get())
         with open("config.ini", "w") as config_file:
             self.config.write(config_file)
 
@@ -1122,6 +1206,11 @@ class ChatWindow:
                 for widget in self.settings_frame.winfo_children():
                     if isinstance(widget, (ttk.Label, ttk.OptionMenu, ttk.Checkbutton)):
                         widget.configure(style="Dark." + widget.winfo_class())
+            if self.model_settings_frame is not None:
+                self.model_settings_frame.configure(style="Dark.TFrame")
+                for widget in self.model_settings_frame.winfo_children():
+                    if isinstance(widget, (ttk.Label, ttk.OptionMenu, ttk.Checkbutton)):
+                        widget.configure(style="Dark." + widget.winfo_class())
         else:
             self.app.configure(bg=self.default_bg_color)
             self.main_frame.configure(style="")
@@ -1140,6 +1229,11 @@ class ChatWindow:
             if self.settings_frame is not None:
                 self.settings_frame.configure(style="")
                 for widget in self.settings_frame.winfo_children():
+                    if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
+                        widget.configure(style=widget.winfo_class())
+            if self.model_settings_frame is not None:
+                self.model_settings_frame.configure(style="")
+                for widget in self.model_settings_frame.winfo_children():
                     if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
                         widget.configure(style=widget.winfo_class())
         self.save_dark_mode_state()
