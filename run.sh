@@ -1,3 +1,7 @@
 #!/bin/bash
 cd "$(dirname "$0")"
-python3 src/main.py
+if [ -x "./venv/bin/python" ]; then
+    ./venv/bin/python src/main.py
+else
+    ./venv/Scripts/python.exe src/main.py
+fi
