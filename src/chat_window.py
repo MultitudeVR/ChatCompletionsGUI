@@ -16,7 +16,7 @@ import shutil
 import base64
 from io import BytesIO
 import mimetypes
-from PIL import Image, ImageGrab
+from PIL import Image, ImageGrab, ImageTk
 from tooltip import ToolTip
 from constants import OPENAI_VISION_MODELS, OPENAI_REASONING_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS, \
     SYSTEM_MESSAGE_DEFAULT_TEXT, DEFAULT_FILE_NAMING_MODEL, MODEL_INFO, \
@@ -47,6 +47,12 @@ class ChatWindow:
         os.makedirs(self.temp_images_dir, exist_ok=True)
         self.message_images = {}  # Maps message widget to list of image paths
         self.image_counter = 0
+        self.image_preview_delay_ms = 500
+        self.image_preview_after_id = None
+        self.image_preview_window = None
+        self.image_preview_photo = None
+        self.image_preview_target = None
+        self.image_preview_position = (0, 0)
 
         self.setup_openai_client()
         self.setup_anthropic_client()
@@ -695,6 +701,8 @@ class ChatWindow:
         message["content_widget"].bind("<<Paste>>", lambda event: self.handle_paste(event))
         message["content_widget"].bind("<Control-a>", lambda event: self.safe_select_all(event))
         message["content_widget"].bind("<Control-A>", lambda event: self.safe_select_all(event))
+        message["content_widget"].bind("<Motion>", lambda event, w=message["content_widget"]: self.handle_image_placeholder_motion(event, w))
+        message["content_widget"].bind("<Leave>", lambda event: self.hide_image_preview())
         
         # Initialize image list for this widget if needed
         if message["content_widget"] not in self.message_images:
@@ -832,6 +840,96 @@ class ChatWindow:
             self.image_detail_dropdown.grid(row=0, column=8, sticky="ne")
         else:
             self.image_detail_dropdown.grid_remove()
+
+    def handle_image_placeholder_motion(self, event, widget):
+        placeholder = self.get_image_placeholder_at_position(widget, event.x, event.y)
+        if placeholder is None:
+            self.hide_image_preview()
+            return
+
+        image_index, _, _ = placeholder
+        image_paths = self.message_images.get(widget, [])
+        if image_index >= len(image_paths):
+            self.hide_image_preview()
+            return
+
+        image_path = image_paths[image_index]
+        target = (widget, image_index, image_path)
+        x_root = event.x_root
+        y_root = event.y_root + 20
+        self.image_preview_position = (x_root, y_root)
+
+        if self.image_preview_window is not None and self.image_preview_target == target:
+            self.position_image_preview(x_root, y_root)
+            return
+
+        if self.image_preview_after_id is not None and self.image_preview_target == target:
+            return
+
+        if self.image_preview_target != target:
+            self.hide_image_preview()
+            self.image_preview_target = target
+            self.image_preview_after_id = self.app.after(
+                self.image_preview_delay_ms,
+                lambda path=image_path, target=target: self.show_image_preview(path, target)
+            )
+
+    def get_image_placeholder_at_position(self, widget, x, y):
+        index = widget.index(f"@{x},{y}")
+        line, column = map(int, index.split("."))
+        line_start = f"{line}.0"
+        line_text = widget.get(line_start, f"{line}.end")
+
+        for match in re.finditer(r"\[image #(\d+)\]", line_text):
+            if match.start() <= column < match.end():
+                return int(match.group(1)), f"{line}.{match.start()}", f"{line}.{match.end()}"
+
+        return None
+
+    def show_image_preview(self, image_path, target):
+        self.image_preview_after_id = None
+        if self.image_preview_target != target:
+            return
+
+        try:
+            with Image.open(image_path) as image:
+                image.thumbnail((480, 360), Image.LANCZOS)
+                preview_image = image.copy()
+        except Exception:
+            self.hide_image_preview()
+            return
+
+        self.image_preview_window = tk.Toplevel(self.app)
+        self.image_preview_window.overrideredirect(True)
+        self.image_preview_window.attributes("-topmost", True)
+
+        self.image_preview_photo = ImageTk.PhotoImage(preview_image)
+        label = tk.Label(
+            self.image_preview_window,
+            image=self.image_preview_photo,
+            background="black",
+            borderwidth=1,
+            relief="solid"
+        )
+        label.pack()
+        x_root, y_root = self.image_preview_position
+        self.position_image_preview(x_root, y_root)
+
+    def position_image_preview(self, x_root, y_root):
+        if self.image_preview_window is not None:
+            self.image_preview_window.geometry(f"+{x_root}+{y_root}")
+
+    def hide_image_preview(self):
+        if self.image_preview_after_id is not None:
+            self.app.after_cancel(self.image_preview_after_id)
+            self.image_preview_after_id = None
+
+        if self.image_preview_window is not None:
+            self.image_preview_window.destroy()
+            self.image_preview_window = None
+
+        self.image_preview_photo = None
+        self.image_preview_target = None
 
     # Functions for synchronizing slider and entry
     def on_temp_entry_change(self, *args):
