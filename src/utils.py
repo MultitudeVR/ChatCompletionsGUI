@@ -285,16 +285,28 @@ def _convert_messages_for_google_dict(messages):
 
 def convert_messages_for_model(model, messages, image_detail="low"):
     if model in OPENAI_REASONING_MODELS:
-        # Update the messages to not include the system role (unsupported in OpenAI's reasoning models)
+        # Reasoning models do not support system messages in this chat-completions path,
+        # but several of them also support vision and still need image payload conversion.
         new_messages = []
         for message in messages:
+            role = message["role"]
             if message["role"] == "system":
-                # Check for image URLs and create a single message with a 'content' array
-                message["role"] = "user"
-                new_messages.append(message)
+                role = "user"
+
+            if (
+                role == "user"
+                and model in OPENAI_VISION_MODELS
+                and image_detail != "none"
+                and "content" in message
+            ):
+                local_images = message.get("local_images", [])
+                message_with_images = parse_and_create_image_messages(message["content"], image_detail, local_images)
+                message_with_images["role"] = role
+                new_messages.append(message_with_images)
             else:
-                # User or assistant messages are added unchanged
-                new_messages.append(message)
+                clean_message = {k: v for k, v in message.items() if k != "local_images"}
+                clean_message["role"] = role
+                new_messages.append(clean_message)
         return new_messages, None
     elif model in OPENAI_VISION_MODELS and image_detail != "none":
         # Update the messages to include image data if any image URLs are found in the user's input
