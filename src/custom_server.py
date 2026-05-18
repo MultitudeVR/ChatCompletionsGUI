@@ -1,7 +1,7 @@
 import tkinter as tk
 
 class CustomServer:
-    def __init__(self, base_url, api_key, org_id, models, on_config_changed):
+    def __init__(self, base_url, api_key, org_id, models, on_config_changed, initialize_client=True):
         self.models = models
         self.baseurl_var = tk.StringVar(value=base_url)
         self.apikey_var = tk.StringVar(value=api_key)
@@ -9,7 +9,9 @@ class CustomServer:
         self.baseurl_var.trace("w", on_config_changed)
         self.apikey_var.trace("w", on_config_changed)
         self.models_var.trace("w", on_config_changed)
-        self.update_client()
+        self.client = None
+        if initialize_client:
+            self.update_client()
         self.update_models()
     
     def update_client(self):

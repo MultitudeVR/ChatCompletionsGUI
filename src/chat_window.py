@@ -7,6 +7,7 @@ from tkinter import messagebox
 from threading import Thread
 import asyncio
 import json
+import queue
 from datetime import datetime
 import random
 import string
@@ -57,9 +58,12 @@ class ChatWindow:
         self.image_preview_target = None
         self.image_preview_position = (0, 0)
 
-        self.setup_openai_client()
-        self.setup_anthropic_client()
-        self.setup_google_client()
+        self.initialize_provider_config_vars()
+        self.openai_client = None
+        self.openai_aclient = None
+        self.anthropic_client = None
+        self.google_client = None
+        self.provider_clients_loaded = False
         self.custom_servers = []
         custom_server_count = 0
         while config.has_section(f"custom_server_{custom_server_count}"):
@@ -67,7 +71,13 @@ class ChatWindow:
             api_key = config.get(f"custom_server_{custom_server_count}", "api_key", fallback="ollama")
             org_id = config.get(f"custom_server_{custom_server_count}", "organization", fallback="")
             custom_models = [model.strip() for model in config.get(f"custom_server_{custom_server_count}", "models", fallback="").split(",") if model.strip()]
-            self.custom_servers.append(CustomServer(base_url, api_key, org_id, custom_models, on_config_changed=lambda *args: self.on_config_changed()))
+            self.custom_servers.append(CustomServer(
+                base_url,
+                api_key,
+                org_id,
+                custom_models,
+                on_config_changed=lambda *args: self.on_config_changed(),
+                initialize_client=False))
             custom_server_count += 1
 
         # Create the main_frame for holding the chat and other widgets
@@ -228,15 +238,102 @@ class ChatWindow:
         self.app.bind_all(f'<{modifier}-n>', self.create_new_window)
         # Add a protocol to handle the close event
         self.app.protocol("WM_DELETE_WINDOW", self.on_close)
-        # Start the application main loop
-        self.app.mainloop()
+        self.app.after_idle(self.start_provider_client_initialization)
+
+    def initialize_provider_config_vars(self):
+        self.openai_apikey_var = tk.StringVar(value=self.config.get("openai", "api_key", fallback=""))
+        self.openai_orgid_var = tk.StringVar(value=self.config.get("openai", "organization", fallback=""))
+        self.anthropic_apikey_var = tk.StringVar(value=self.config.get("anthropic", "api_key", fallback=""))
+        self.google_apikey_var = tk.StringVar(value=self.config.get("google", "api_key", fallback=""))
+        self.openai_apikey_var.trace("w", self.on_config_changed)
+        self.openai_orgid_var.trace("w", self.on_config_changed)
+        self.anthropic_apikey_var.trace("w", self.on_config_changed)
+        self.google_apikey_var.trace("w", self.on_config_changed)
+
+    def start_provider_client_initialization(self):
+        provider_config = {
+            "openai_api_key": self.openai_apikey_var.get(),
+            "openai_org_id": self.openai_orgid_var.get(),
+            "anthropic_api_key": self.anthropic_apikey_var.get(),
+            "google_api_key": self.google_apikey_var.get(),
+            "custom_servers": [
+                {
+                    "base_url": custom_server.baseurl_var.get(),
+                    "api_key": custom_server.apikey_var.get(),
+                }
+                for custom_server in self.custom_servers
+            ],
+        }
+        self.provider_client_result_queue = queue.Queue()
+        Thread(
+            target=self.initialize_provider_clients_in_background,
+            args=(provider_config,),
+            daemon=True).start()
+        self.poll_provider_client_initialization()
+
+    def initialize_provider_clients_in_background(self, provider_config):
+        result = {
+            "openai_client": None,
+            "openai_aclient": None,
+            "anthropic_client": None,
+            "google_client": None,
+            "custom_clients": [None for _ in provider_config["custom_servers"]],
+        }
+
+        openai_api_key = provider_config["openai_api_key"]
+        custom_servers = provider_config["custom_servers"]
+        if openai_api_key or custom_servers:
+            try:
+                from openai import OpenAI, AsyncOpenAI
+                if openai_api_key:
+                    result["openai_client"] = OpenAI(
+                        api_key=openai_api_key,
+                        organization=provider_config["openai_org_id"])
+                    result["openai_aclient"] = AsyncOpenAI(
+                        api_key=openai_api_key,
+                        organization=provider_config["openai_org_id"])
+                for i, custom_server in enumerate(custom_servers):
+                    result["custom_clients"][i] = AsyncOpenAI(
+                        base_url=custom_server["base_url"],
+                        api_key=custom_server["api_key"])
+            except ImportError:
+                print("OpenAI package not found, OpenAI and custom server models will be disabled! Install the OpenAI API with `pip install openai`")
+
+        if provider_config["anthropic_api_key"]:
+            try:
+                import anthropic
+                result["anthropic_client"] = anthropic.Anthropic(api_key=provider_config["anthropic_api_key"])
+            except ImportError:
+                print("WARNING: Anthropic API not installed. If you wish to use Anthropic models, install the 'anthropic' package with the `pip install anthropic` command.")
+
+        if provider_config["google_api_key"]:
+            try:
+                from google import genai
+                result["google_client"] = genai.Client(api_key=provider_config["google_api_key"])
+            except ImportError:
+                print("WARNING: Google GenAI SDK not installed. If you wish to use Google Gemini models, install the 'google-genai' package with the `pip install google-genai` command.")
+
+        self.provider_client_result_queue.put(result)
+
+    def poll_provider_client_initialization(self):
+        try:
+            result = self.provider_client_result_queue.get_nowait()
+        except queue.Empty:
+            self.app.after(50, self.poll_provider_client_initialization)
+            return
+        self.finish_provider_client_initialization(result)
+
+    def finish_provider_client_initialization(self, result):
+        self.openai_client = result["openai_client"]
+        self.openai_aclient = result["openai_aclient"]
+        self.anthropic_client = result["anthropic_client"]
+        self.google_client = result["google_client"]
+        for custom_server, client in zip(self.custom_servers, result["custom_clients"]):
+            custom_server.client = client
+        self.provider_clients_loaded = True
+        self.update_models_dropdown()
 
     def setup_openai_client(self):
-        if not hasattr(self, "openai_apikey_var"):
-            self.openai_apikey_var = tk.StringVar(value=self.config.get("openai", "api_key", fallback=""))
-            self.openai_orgid_var = tk.StringVar(value=self.config.get("openai", "organization", fallback=""))
-            self.openai_apikey_var.trace("w", self.on_config_changed)
-            self.openai_orgid_var.trace("w", self.on_config_changed)
         if self.openai_apikey_var.get():
             try:
                 from openai import OpenAI, AsyncOpenAI
@@ -254,9 +351,6 @@ class ChatWindow:
             self.openai_aclient = None
 
     def setup_anthropic_client(self):
-        if not hasattr(self, "anthropic_apikey_var"):
-            self.anthropic_apikey_var = tk.StringVar(value=self.config.get("anthropic", "api_key", fallback=""))
-            self.anthropic_apikey_var.trace("w", self.on_config_changed)
         if self.anthropic_apikey_var.get():
             try:
                 import anthropic
@@ -271,9 +365,6 @@ class ChatWindow:
             self.anthropic_client = None
 
     def setup_google_client(self):
-        if not hasattr(self, "google_apikey_var"):
-            self.google_apikey_var = tk.StringVar(value=self.config.get("google", "api_key", fallback=""))
-            self.google_apikey_var.trace("w", self.on_config_changed)
         if self.google_apikey_var.get():
             try:
                 from google import genai
@@ -643,11 +734,13 @@ class ChatWindow:
     def update_models_dropdown(self):
         # Update the model dropdown menu with available models
         current_model = self.model_var.get()
-        anthropic_models = ANTHROPIC_MODELS if "anthropic" in sys.modules and self.anthropic_apikey_var.get() else []
+        anthropic_models = ANTHROPIC_MODELS if self.anthropic_client is not None else []
         google_models = GOOGLE_MODELS if self.google_client is not None else []
-        openai_models = OPENAI_MODELS if "openai" in sys.modules and self.openai_apikey_var.get() else []
+        openai_models = OPENAI_MODELS if self.openai_client is not None else []
         custom_models = [model for server in self.custom_servers for model in server.models]
         possible_models = [*openai_models, *anthropic_models, *google_models, *custom_models]
+        if current_model and current_model not in possible_models:
+            possible_models.insert(0, current_model)
         if hasattr(self, "model_dropdown"):
             self.model_dropdown.destroy()
         if hasattr(self, "model_settings_button"):
