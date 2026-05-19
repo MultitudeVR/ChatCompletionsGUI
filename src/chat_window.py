@@ -22,7 +22,7 @@ from tooltip import ToolTip
 from constants import OPENAI_VISION_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS, \
     SYSTEM_MESSAGE_DEFAULT_TEXT, DEFAULT_FILE_NAMING_MODEL, MODEL_INFO, \
     HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE, ANTHROPIC_VISION_MODELS, GOOGLE_VISION_MODELS, \
-    OPENAI_REASONING_EFFORTS, OPENAI_RESPONSES_MODELS
+    OPENAI_REASONING_EFFORTS, OPENAI_REASONING_MODELS, OPENAI_RESPONSES_MODELS
 from prompts import file_naming_prompt
 from utils import convert_messages_for_model, convert_messages_for_google, parse_and_create_image_messages, count_tokens, convert_text_to_tokens, convert_tokens_to_text
 from custom_server import CustomServer
@@ -578,14 +578,16 @@ class ChatWindow:
                         self.app.after(0, self.add_empty_user_message)
                     return
 
-                if self.model_var.get() in OPENAI_REASONING_EFFORTS:
+                if not self.model_supports_temperature():
                     self.ensure_valid_reasoning_effort()
-                    response = streaming_client.chat.completions.create(
+                    request_args = dict(
                         model=self.model_var.get(),
                         messages=messages,
                         max_completion_tokens=self.max_length_var.get(),
-                        reasoning_effort=self.reasoning_effort_var.get(),
                         stream=True)
+                    if self.model_var.get() in OPENAI_REASONING_EFFORTS:
+                        request_args["reasoning_effort"] = self.reasoning_effort_var.get()
+                    response = streaming_client.chat.completions.create(**request_args)
                 else:
                     response = streaming_client.chat.completions.create(model=self.model_var.get(),
                         messages=messages,
@@ -994,6 +996,10 @@ class ChatWindow:
         model = self.model_var.get()
         return model in OPENAI_VISION_MODELS or model in ANTHROPIC_VISION_MODELS or model in GOOGLE_VISION_MODELS
 
+    def model_supports_temperature(self):
+        model = self.model_var.get()
+        return model not in OPENAI_REASONING_MODELS and model not in OPENAI_RESPONSES_MODELS
+
     def ensure_valid_reasoning_effort(self):
         efforts = OPENAI_REASONING_EFFORTS.get(self.model_var.get())
         if not efforts:
@@ -1027,13 +1033,16 @@ class ChatWindow:
 
         self.ensure_valid_reasoning_effort()
         model = self.model_var.get()
+        temperature_state = "normal" if self.model_supports_temperature() else "disabled"
 
         ttk.Label(self.model_settings_frame, text="Model:").grid(row=0, column=0, sticky="e", padx=(0, 8), pady=4)
         ttk.Label(self.model_settings_frame, text=model).grid(row=0, column=1, sticky="w", pady=4)
 
         ttk.Label(self.model_settings_frame, text="Temperature:").grid(row=1, column=0, sticky="e", padx=(0, 8), pady=4)
-        ttk.Scale(self.model_settings_frame, variable=self.temperature_var, from_=0, to=1, orient="horizontal").grid(row=1, column=1, sticky="we", pady=4)
-        ttk.Entry(self.model_settings_frame, textvariable=self.temp_entry_var, width=7).grid(row=1, column=2, sticky="w", padx=(8, 0), pady=4)
+        temperature_scale = ttk.Scale(self.model_settings_frame, variable=self.temperature_var, from_=0, to=1, orient="horizontal")
+        temperature_scale.configure(state=temperature_state)
+        temperature_scale.grid(row=1, column=1, sticky="we", pady=4)
+        ttk.Entry(self.model_settings_frame, textvariable=self.temp_entry_var, width=7, state=temperature_state).grid(row=1, column=2, sticky="w", padx=(8, 0), pady=4)
 
         ttk.Label(self.model_settings_frame, text="Max length:").grid(row=2, column=0, sticky="e", padx=(0, 8), pady=4)
         ttk.Scale(self.model_settings_frame, variable=self.max_length_var, from_=1, to=128000, orient="horizontal").grid(row=2, column=1, sticky="we", pady=4)
