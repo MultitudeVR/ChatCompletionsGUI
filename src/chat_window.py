@@ -298,6 +298,8 @@ class ChatWindow:
                         api_key=custom_server["api_key"])
             except ImportError:
                 print("OpenAI package not found, OpenAI and custom server models will be disabled! Install the OpenAI API with `pip install openai`")
+            except Exception as exc:
+                print(f"WARNING: OpenAI client initialization failed, OpenAI and custom server models will be disabled: {exc}")
 
         if provider_config["anthropic_api_key"]:
             try:
@@ -305,6 +307,8 @@ class ChatWindow:
                 result["anthropic_client"] = anthropic.Anthropic(api_key=provider_config["anthropic_api_key"])
             except ImportError:
                 print("WARNING: Anthropic API not installed. If you wish to use Anthropic models, install the 'anthropic' package with the `pip install anthropic` command.")
+            except Exception as exc:
+                print(f"WARNING: Anthropic client initialization failed, Anthropic models will be disabled: {exc}")
 
         if provider_config["google_api_key"]:
             try:
@@ -312,6 +316,8 @@ class ChatWindow:
                 result["google_client"] = genai.Client(api_key=provider_config["google_api_key"])
             except ImportError:
                 print("WARNING: Google GenAI SDK not installed. If you wish to use Google Gemini models, install the 'google-genai' package with the `pip install google-genai` command.")
+            except Exception as exc:
+                print(f"WARNING: Google GenAI client initialization failed, Google Gemini models will be disabled: {exc}")
 
         self.provider_client_result_queue.put(result)
 
@@ -344,8 +350,13 @@ class ChatWindow:
                 self.openai_aclient = None
                 self.openai_client = None
                 return
-            self.openai_client = OpenAI(api_key=self.openai_apikey_var.get(), organization=self.openai_orgid_var.get())
-            self.openai_aclient = AsyncOpenAI(api_key=self.openai_apikey_var.get(), organization=self.openai_orgid_var.get())
+            try:
+                self.openai_client = OpenAI(api_key=self.openai_apikey_var.get(), organization=self.openai_orgid_var.get())
+                self.openai_aclient = AsyncOpenAI(api_key=self.openai_apikey_var.get(), organization=self.openai_orgid_var.get())
+            except Exception as exc:
+                print(f"WARNING: OpenAI client initialization failed: {exc}")
+                self.openai_client = None
+                self.openai_aclient = None
         else:
             self.openai_client = None
             self.openai_aclient = None
@@ -360,7 +371,11 @@ class ChatWindow:
                 print(error_message)
                 self.anthropic_client = None
                 return
-            self.anthropic_client = anthropic.Anthropic(api_key=self.anthropic_apikey_var.get())
+            try:
+                self.anthropic_client = anthropic.Anthropic(api_key=self.anthropic_apikey_var.get())
+            except Exception as exc:
+                print(f"WARNING: Anthropic client initialization failed: {exc}")
+                self.anthropic_client = None
         else:
             self.anthropic_client = None
 
@@ -373,7 +388,11 @@ class ChatWindow:
                 print(error_message)
                 self.google_client = None
                 return
-            self.google_client = genai.Client(api_key=self.google_apikey_var.get())
+            try:
+                self.google_client = genai.Client(api_key=self.google_apikey_var.get())
+            except Exception as exc:
+                print(f"WARNING: Google GenAI client initialization failed: {exc}")
+                self.google_client = None
         else:
             self.google_client = None
     

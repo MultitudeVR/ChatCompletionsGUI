@@ -21,7 +21,11 @@ class CustomServer:
             self.client = None
             print("OpenAI package not found, custom servers will be disabled! Install the OpenAI API with `pip install openai`")
             return
-        self.client = AsyncOpenAI(base_url=self.baseurl_var.get(), api_key=self.apikey_var.get())
+        try:
+            self.client = AsyncOpenAI(base_url=self.baseurl_var.get(), api_key=self.apikey_var.get())
+        except Exception as exc:
+            self.client = None
+            print(f"WARNING: Custom server client initialization failed: {exc}")
 
     def update_models(self):
         self.models.clear()
