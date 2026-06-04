@@ -48,6 +48,13 @@ OPENAI_MODELS = [
     # "gpt-3.5-turbo-16k-0613",
 ]
 ANTHROPIC_MODELS = [
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-opus-4-6",
+    "claude-opus-4-5-20251101",
+    "claude-sonnet-4-6",
+    "claude-sonnet-4-5-20250929",
+    "claude-haiku-4-5-20251001",
     "claude-opus-4-1-20250805",
     "claude-opus-4-20250514",
     "claude-sonnet-4-20250514",
@@ -57,6 +64,10 @@ ANTHROPIC_MODELS = [
     "claude-3-5-sonnet-20240620",
     "claude-3-haiku-20240307",
     "claude-3-opus-20240229"
+]
+ANTHROPIC_NO_TEMPERATURE_MODELS = [
+    "claude-opus-4-8",
+    "claude-opus-4-7",
 ]
 GOOGLE_MODELS = [
     "gemini-3-flash-preview",
@@ -135,6 +146,13 @@ OPENAI_REASONING_MODELS = [
     'o1-preview-2024-09-12',
 ]
 ANTHROPIC_VISION_MODELS = [
+    'claude-opus-4-8',
+    'claude-opus-4-7',
+    'claude-opus-4-6',
+    'claude-opus-4-5-20251101',
+    'claude-sonnet-4-6',
+    'claude-sonnet-4-5-20250929',
+    'claude-haiku-4-5-20251001',
     'claude-opus-4-1-20250805',
     'claude-opus-4-20250514',
     'claude-sonnet-4-20250514',
@@ -178,6 +196,19 @@ OPENAI_REASONING_EFFORTS = {
     "o3-mini": ["low", "medium", "high"],
     "o4-mini": ["low", "medium", "high"],
 }
+ANTHROPIC_REASONING_EFFORTS = {
+    "claude-opus-4-8": ["low", "medium", "high", "xhigh", "max"],
+    "claude-opus-4-7": ["low", "medium", "high", "xhigh", "max"],
+    "claude-opus-4-6": ["low", "medium", "high", "max"],
+    "claude-sonnet-4-6": ["low", "medium", "high", "max"],
+    "claude-opus-4-5-20251101": ["low", "medium", "high"],
+}
+ANTHROPIC_ADAPTIVE_THINKING_MODELS = [
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
+]
 OPENAI_RESPONSES_MODELS = [
     "gpt-5.5-pro",
     "gpt-5.4-pro",
@@ -223,6 +254,13 @@ MODEL_INFO = {
     "o3": {"max_tokens": 128000, "input_price": 0.002, "output_price": 0.008},
     "o3-mini": {"max_tokens": 128000, "input_price": 0.0011, "output_price": 0.0044},
     "o4-mini": {"max_tokens": 128000, "input_price": 0.0011, "output_price": 0.0044},
+    "claude-opus-4-8": {"max_tokens": 1000000, "input_price": 0.005, "output_price": 0.025},
+    "claude-opus-4-7": {"max_tokens": 1000000, "input_price": 0.005, "output_price": 0.025},
+    "claude-opus-4-6": {"max_tokens": 1000000, "input_price": 0.005, "output_price": 0.025},
+    "claude-opus-4-5-20251101": {"max_tokens": 200000, "input_price": 0.005, "output_price": 0.025},
+    "claude-sonnet-4-6": {"max_tokens": 1000000, "input_price": 0.003, "output_price": 0.015},
+    "claude-sonnet-4-5-20250929": {"max_tokens": 200000, "input_price": 0.003, "output_price": 0.015},
+    "claude-haiku-4-5-20251001": {"max_tokens": 200000, "input_price": 0.001, "output_price": 0.005},
     "claude-opus-4-1-20250805": {"max_tokens": 128000, "input_price": 0.015, "output_price": 0.075},
     "claude-opus-4-20250514": {"max_tokens": 128000, "input_price": 0.015, "output_price": 0.075},
     "claude-sonnet-4-20250514": {"max_tokens": 128000, "input_price": 0.003, "output_price": 0.015},

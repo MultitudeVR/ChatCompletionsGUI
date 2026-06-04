@@ -22,7 +22,8 @@ from tooltip import ToolTip
 from constants import OPENAI_VISION_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS, GOOGLE_MODELS, \
     SYSTEM_MESSAGE_DEFAULT_TEXT, DEFAULT_FILE_NAMING_MODEL, MODEL_INFO, \
     HIGH_DETAIL_COST_PER_IMAGE, LOW_DETAIL_COST_PER_IMAGE, ANTHROPIC_VISION_MODELS, GOOGLE_VISION_MODELS, \
-    OPENAI_REASONING_EFFORTS, OPENAI_REASONING_MODELS, OPENAI_RESPONSES_MODELS
+    OPENAI_REASONING_EFFORTS, OPENAI_REASONING_MODELS, OPENAI_RESPONSES_MODELS, ANTHROPIC_NO_TEMPERATURE_MODELS, \
+    ANTHROPIC_REASONING_EFFORTS, ANTHROPIC_ADAPTIVE_THINKING_MODELS
 from prompts import file_naming_prompt
 from utils import convert_messages_for_model, convert_messages_for_google, parse_and_create_image_messages, count_tokens, convert_text_to_tokens, convert_tokens_to_text
 from custom_server import CustomServer
@@ -653,23 +654,29 @@ class ChatWindow:
             self.show_error_popup(error_message)
             return
         async def streaming_anthropic_chat_completion():
-            with self.anthropic_client.messages.stream(
+            request_args = dict(
                     model=self.model_var.get(),
                     max_tokens=min(self.max_length_var.get(), 4000), # 4000 is the max tokens for anthropic
                     messages=messages,
-                    system=system_message.strip(),
-                    temperature=self.temperature_var.get()
-                ) as stream:
-                try:
+                    system=system_message.strip())
+            if self.model_supports_temperature():
+                request_args["temperature"] = self.temperature_var.get()
+            if self.model_var.get() in ANTHROPIC_REASONING_EFFORTS:
+                self.ensure_valid_reasoning_effort()
+                request_args["output_config"] = {"effort": self.reasoning_effort_var.get()}
+                if self.model_var.get() in ANTHROPIC_ADAPTIVE_THINKING_MODELS:
+                    request_args["thinking"] = {"type": "adaptive"}
+
+            try:
+                with self.anthropic_client.messages.stream(**request_args) as stream:
                     for text in stream.text_stream:
                         self.app.after(0, self.add_to_last_message, text)
                         if self.is_streaming_cancelled:
                             break
-                except Exception as e:
-                    error_message = f"An unexpected error occurred: {e}"
-                    loop.call_soon_threadsafe(self.show_error_popup, error_message)
-                finally:
-                    stream.close()
+            except Exception as e:
+                error_message = f"An unexpected error occurred: {e}"
+                loop.call_soon_threadsafe(self.show_error_popup, error_message)
+                return
             if not self.is_streaming_cancelled:
                 self.app.after(0, self.add_empty_user_message)
         loop = asyncio.new_event_loop()
@@ -1017,10 +1024,18 @@ class ChatWindow:
 
     def model_supports_temperature(self):
         model = self.model_var.get()
-        return model not in OPENAI_REASONING_MODELS and model not in OPENAI_RESPONSES_MODELS
+        return (
+            model not in OPENAI_REASONING_MODELS
+            and model not in OPENAI_RESPONSES_MODELS
+            and model not in ANTHROPIC_NO_TEMPERATURE_MODELS
+        )
+
+    def get_reasoning_efforts(self, model=None):
+        model = model or self.model_var.get()
+        return OPENAI_REASONING_EFFORTS.get(model) or ANTHROPIC_REASONING_EFFORTS.get(model)
 
     def ensure_valid_reasoning_effort(self):
-        efforts = OPENAI_REASONING_EFFORTS.get(self.model_var.get())
+        efforts = self.get_reasoning_efforts()
         if not efforts:
             return
 
@@ -1073,7 +1088,7 @@ class ChatWindow:
             ttk.OptionMenu(self.model_settings_frame, self.image_detail_var, self.image_detail_var.get(), "none", "low", "high").grid(row=row, column=1, sticky="w", pady=4)
             row += 1
 
-        reasoning_efforts = OPENAI_REASONING_EFFORTS.get(model)
+        reasoning_efforts = self.get_reasoning_efforts(model)
         if reasoning_efforts:
             ttk.Label(self.model_settings_frame, text="Reasoning:").grid(row=row, column=0, sticky="e", padx=(0, 8), pady=4)
             ttk.OptionMenu(self.model_settings_frame, self.reasoning_effort_var, self.reasoning_effort_var.get(), *reasoning_efforts).grid(row=row, column=1, sticky="w", pady=4)
