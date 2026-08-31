@@ -65,6 +65,7 @@ class ChatWindow:
         self.anthropic_client = None
         self.google_client = None
         self.provider_clients_loaded = False
+        self.provider_initialization_errors = []
         self.custom_servers = []
         custom_server_count = 0
         while config.has_section(f"custom_server_{custom_server_count}"):
@@ -252,19 +253,7 @@ class ChatWindow:
         self.google_apikey_var.trace("w", self.on_config_changed)
 
     def start_provider_client_initialization(self):
-        provider_config = {
-            "openai_api_key": self.openai_apikey_var.get(),
-            "openai_org_id": self.openai_orgid_var.get(),
-            "anthropic_api_key": self.anthropic_apikey_var.get(),
-            "google_api_key": self.google_apikey_var.get(),
-            "custom_servers": [
-                {
-                    "base_url": custom_server.baseurl_var.get(),
-                    "api_key": custom_server.apikey_var.get(),
-                }
-                for custom_server in self.custom_servers
-            ],
-        }
+        provider_config = self.get_provider_config()
         self.provider_client_result_queue = queue.Queue()
         Thread(
             target=self.initialize_provider_clients_in_background,
@@ -279,48 +268,92 @@ class ChatWindow:
             "anthropic_client": None,
             "google_client": None,
             "custom_clients": [None for _ in provider_config["custom_servers"]],
+            "errors": [],
+            "provider_config": provider_config,
         }
 
-        openai_api_key = provider_config["openai_api_key"]
+        openai_api_key = provider_config["openai_api_key"].strip()
         custom_servers = provider_config["custom_servers"]
         if openai_api_key or custom_servers:
             try:
                 from openai import OpenAI, AsyncOpenAI
-                if openai_api_key:
-                    result["openai_client"] = OpenAI(
-                        api_key=openai_api_key,
-                        organization=provider_config["openai_org_id"])
-                    result["openai_aclient"] = AsyncOpenAI(
-                        api_key=openai_api_key,
-                        organization=provider_config["openai_org_id"])
-                for i, custom_server in enumerate(custom_servers):
-                    result["custom_clients"][i] = AsyncOpenAI(
-                        base_url=custom_server["base_url"],
-                        api_key=custom_server["api_key"])
             except ImportError:
-                print("OpenAI package not found, OpenAI and custom server models will be disabled! Install the OpenAI API with `pip install openai`")
-            except Exception as exc:
-                print(f"WARNING: OpenAI client initialization failed, OpenAI and custom server models will be disabled: {exc}")
+                result["errors"].append(
+                    "OpenAI: SDK not installed. Install it with `pip install openai`."
+                )
+            else:
+                if openai_api_key:
+                    try:
+                        result["openai_client"] = OpenAI(
+                            api_key=openai_api_key,
+                            organization=provider_config["openai_org_id"] or None)
+                        result["openai_aclient"] = AsyncOpenAI(
+                            api_key=openai_api_key,
+                            organization=provider_config["openai_org_id"] or None)
+                    except Exception as exc:
+                        result["errors"].append(
+                            f"OpenAI: client initialization failed: {exc}"
+                        )
+
+                for i, custom_server in enumerate(custom_servers):
+                    try:
+                        result["custom_clients"][i] = AsyncOpenAI(
+                            base_url=custom_server["base_url"],
+                            api_key=custom_server["api_key"])
+                    except Exception as exc:
+                        result["errors"].append(
+                            f"Custom server {i + 1}: client initialization failed: {exc}"
+                        )
 
         if provider_config["anthropic_api_key"]:
             try:
                 import anthropic
                 result["anthropic_client"] = anthropic.Anthropic(api_key=provider_config["anthropic_api_key"])
             except ImportError:
-                print("WARNING: Anthropic API not installed. If you wish to use Anthropic models, install the 'anthropic' package with the `pip install anthropic` command.")
+                result["errors"].append(
+                    "Anthropic: SDK not installed. Install it with `pip install anthropic`."
+                )
             except Exception as exc:
-                print(f"WARNING: Anthropic client initialization failed, Anthropic models will be disabled: {exc}")
+                result["errors"].append(
+                    f"Anthropic: client initialization failed: {exc}"
+                )
 
         if provider_config["google_api_key"]:
             try:
                 from google import genai
                 result["google_client"] = genai.Client(api_key=provider_config["google_api_key"])
             except ImportError:
-                print("WARNING: Google GenAI SDK not installed. If you wish to use Google Gemini models, install the 'google-genai' package with the `pip install google-genai` command.")
+                result["errors"].append(
+                    "Google: SDK not installed. Install it with `pip install google-genai`."
+                )
             except Exception as exc:
-                print(f"WARNING: Google GenAI client initialization failed, Google Gemini models will be disabled: {exc}")
+                result["errors"].append(
+                    f"Google: client initialization failed: {exc}"
+                )
 
         self.provider_client_result_queue.put(result)
+
+    def get_provider_config(self):
+        return {
+            "openai_api_key": self.openai_apikey_var.get(),
+            "openai_org_id": self.openai_orgid_var.get(),
+            "anthropic_api_key": self.anthropic_apikey_var.get(),
+            "google_api_key": self.google_apikey_var.get(),
+            "custom_servers": [
+                {
+                    "base_url": custom_server.baseurl_var.get(),
+                    "api_key": custom_server.apikey_var.get(),
+                }
+                for custom_server in self.custom_servers
+            ],
+        }
+
+    def get_provider_initialization_error(self, provider, fallback):
+        prefix = f"{provider}:"
+        for error in self.provider_initialization_errors:
+            if error.startswith(prefix):
+                return error
+        return fallback
 
     def poll_provider_client_initialization(self):
         try:
@@ -331,14 +364,26 @@ class ChatWindow:
         self.finish_provider_client_initialization(result)
 
     def finish_provider_client_initialization(self, result):
+        # A settings edit can finish while the background initialization is
+        # still running. Do not let that stale result overwrite the newly
+        # configured clients.
+        if result.get("provider_config") != self.get_provider_config():
+            return
+
         self.openai_client = result["openai_client"]
         self.openai_aclient = result["openai_aclient"]
         self.anthropic_client = result["anthropic_client"]
         self.google_client = result["google_client"]
         for custom_server, client in zip(self.custom_servers, result["custom_clients"]):
             custom_server.client = client
+        self.provider_initialization_errors = result.get("errors", [])
         self.provider_clients_loaded = True
         self.update_models_dropdown()
+        if self.provider_initialization_errors:
+            self.show_error_popup(
+                "Provider setup warnings:\n\n" +
+                "\n".join(self.provider_initialization_errors)
+            )
 
     def setup_openai_client(self):
         if self.openai_apikey_var.get():
@@ -572,7 +617,10 @@ class ChatWindow:
             if self.model_var.get() in OPENAI_MODELS:
                 streaming_client = self.openai_aclient
                 if not streaming_client:
-                    self.show_error_popup("OpenAI API not installed. Please install the 'openai' package with the `pip install openai` command.")
+                    self.show_error_popup(self.get_provider_initialization_error(
+                        "OpenAI",
+                        "OpenAI client is unavailable. Check the API key and OpenAI SDK installation in Settings."
+                    ))
                     return
             else:
                 streaming_client = next((server.client for server in self.custom_servers if self.model_var.get() in server.models), None)
@@ -685,7 +733,13 @@ class ChatWindow:
 
     def stream_google_model_output(self, contents, config=None):
         if self.google_client is None:
-            error_message = "Google API key is not configured. Please configure it in the settings."
+            if self.google_apikey_var.get().strip():
+                error_message = self.get_provider_initialization_error(
+                    "Google",
+                    "Google GenAI client is unavailable. Check the API key and `google-genai` installation in Settings."
+                )
+            else:
+                error_message = "Google API key is not configured. Please configure it in the settings."
             self.show_error_and_open_settings(error_message)
             return
         async def streaming_google_chat_completion():
@@ -762,9 +816,18 @@ class ChatWindow:
     def update_models_dropdown(self):
         # Update the model dropdown menu with available models
         current_model = self.model_var.get()
-        anthropic_models = ANTHROPIC_MODELS if self.anthropic_client is not None else []
-        google_models = GOOGLE_MODELS if self.google_client is not None else []
-        openai_models = OPENAI_MODELS if self.openai_client is not None else []
+        # Keep configured providers visible while their clients are loading or
+        # when construction failed. Otherwise a transient SDK/configuration
+        # problem makes the model list disappear and hides the useful error.
+        anthropic_models = ANTHROPIC_MODELS if (
+            self.anthropic_client is not None or self.anthropic_apikey_var.get().strip()
+        ) else []
+        google_models = GOOGLE_MODELS if (
+            self.google_client is not None or self.google_apikey_var.get().strip()
+        ) else []
+        openai_models = OPENAI_MODELS if (
+            self.openai_client is not None or self.openai_apikey_var.get().strip()
+        ) else []
         custom_models = [model for server in self.custom_servers for model in server.models]
         possible_models = [*openai_models, *anthropic_models, *google_models, *custom_models]
         if current_model and current_model not in possible_models:
@@ -1335,16 +1398,13 @@ class ChatWindow:
         self.save_api_key()
 
     def save_api_key(self):
-        if self.openai_apikey_var.get() != "":
-            self.config.set("openai", "api_key", self.openai_apikey_var.get())
-            self.config.set("openai", "organization", self.openai_orgid_var.get())
-            self.setup_openai_client()
-        if self.anthropic_apikey_var.get() != "":
-            self.config.set("anthropic", "api_key", self.anthropic_apikey_var.get())
-            self.setup_anthropic_client()
-        if self.google_apikey_var.get() != "":
-            self.config.set("google", "api_key", self.google_apikey_var.get())
-            self.setup_google_client()
+        self.config.set("openai", "api_key", self.openai_apikey_var.get())
+        self.config.set("openai", "organization", self.openai_orgid_var.get())
+        self.setup_openai_client()
+        self.config.set("anthropic", "api_key", self.anthropic_apikey_var.get())
+        self.setup_anthropic_client()
+        self.config.set("google", "api_key", self.google_apikey_var.get())
+        self.setup_google_client()
         for i, custom_server in enumerate(self.custom_servers):
             if not self.config.has_section(f"custom_server_{i}"):
                 self.config.add_section(f"custom_server_{i}")
