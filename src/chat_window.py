@@ -108,6 +108,8 @@ class ChatWindow:
         self.model_refresh_in_progress = set()
         self.model_refresh_poll_after_id = None
         self.model_refresh_buttons = {}
+        self.ui_callback_queue = queue.Queue()
+        self.ui_callback_poll_after_id = None
         self.settings_undo_traces = []
         self.custom_servers = []
         custom_server_count = 0
@@ -278,6 +280,7 @@ class ChatWindow:
         # Add a protocol to handle the close event
         self.app.protocol("WM_DELETE_WINDOW", self.on_close)
         self.app.after_idle(self.start_provider_client_initialization)
+        self.ui_callback_poll_after_id = self.app.after(50, self.process_ui_callbacks)
 
     def initialize_provider_config_vars(self):
         self.openai_apikey_var = tk.StringVar(value=self.config.get("openai", "api_key", fallback=""))
@@ -593,6 +596,30 @@ class ChatWindow:
                 return error
         return fallback
 
+    def post_to_ui(self, callback, *args, **kwargs):
+        """Queue a callback for Tk's thread instead of touching Tk from a worker."""
+        self.ui_callback_queue.put((callback, args, kwargs))
+
+    def process_ui_callbacks(self):
+        """Run callbacks queued by request threads on the Tk event loop."""
+        self.ui_callback_poll_after_id = None
+        for _ in range(50):
+            try:
+                callback, args, kwargs = self.ui_callback_queue.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                callback(*args, **kwargs)
+            except tk.TclError:
+                # The app may have been closed while a request was finishing.
+                pass
+
+        try:
+            if self.app.winfo_exists():
+                self.ui_callback_poll_after_id = self.app.after(50, self.process_ui_callbacks)
+        except tk.TclError:
+            pass
+
     def poll_provider_client_initialization(self):
         try:
             result = self.provider_client_result_queue.get_nowait()
@@ -782,26 +809,51 @@ class ChatWindow:
         return True
 
     def submit_chat_request(self):
+        model_name = self.model_var.get()
+        image_detail = self.image_detail_var.get()
+        temperature = self.temperature_var.get()
+        max_length = self.max_length_var.get()
+        reasoning_effort = self.reasoning_effort_var.get()
+        google_api_key = self.google_apikey_var.get()
         messages = self.get_messages_from_chat_history()
         if not self.check_token_limits(messages):
             return
-        messages, anthropic_system_message = convert_messages_for_model(self.model_var.get(), messages, self.image_detail_var.get())
+        messages, anthropic_system_message = convert_messages_for_model(model_name, messages, image_detail)
         # send request
         def request_thread():
-            model_name = self.model_var.get()
             if model_name in self.anthropic_models:
-                self.stream_anthropic_model_output(messages, anthropic_system_message)
+                self.stream_anthropic_model_output(
+                    messages,
+                    anthropic_system_message,
+                    model_name=model_name,
+                    temperature=temperature,
+                    max_length=max_length,
+                    reasoning_effort=reasoning_effort)
             elif model_name in self.google_models:
                 google_contents, google_config = convert_messages_for_google(messages)
-                self.stream_google_model_output(google_contents, google_config)
+                self.stream_google_model_output(
+                    google_contents,
+                    google_config,
+                    model_name=model_name,
+                    temperature=temperature,
+                    max_length=max_length,
+                    google_api_key=google_api_key)
             else:
-                self.stream_openai_model_output(messages)
+                self.stream_openai_model_output(
+                    messages,
+                    model_name=model_name,
+                    image_detail=image_detail,
+                    temperature=temperature,
+                    max_length=max_length,
+                    reasoning_effort=reasoning_effort)
             
         self.is_streaming_cancelled = False
         self.set_submit_button(False)
         Thread(target=request_thread).start()
 
-    def convert_messages_for_responses_api(self, messages):
+    def convert_messages_for_responses_api(self, messages, model=None, image_detail=None):
+        model = model or self.model_var.get()
+        image_detail = image_detail or self.image_detail_var.get()
         responses_input = []
         for message in messages:
             role = message.get("role", "user")
@@ -812,10 +864,11 @@ class ChatWindow:
             local_images = message.get("local_images", [])
             if (
                 role == "user"
-                and self.image_detail_var.get() != "none"
-                and self.model_var.get() in OPENAI_VISION_MODELS
+                and image_detail != "none"
+                and model in OPENAI_VISION_MODELS
+                and isinstance(content, str)
             ):
-                content = parse_and_create_image_messages(content, self.image_detail_var.get(), local_images)["content"]
+                content = parse_and_create_image_messages(content, image_detail, local_images)["content"]
 
             if isinstance(content, list):
                 response_content = []
@@ -827,7 +880,7 @@ class ChatWindow:
                         response_content.append({
                             "type": "input_image",
                             "image_url": image_url.get("url", ""),
-                            "detail": image_url.get("detail", self.image_detail_var.get())
+                            "detail": image_url.get("detail", image_detail)
                         })
             else:
                 response_content = [{"type": "input_text", "text": str(content)}]
@@ -850,135 +903,174 @@ class ChatWindow:
 
         return "".join(text_parts)
 
-    def stream_openai_model_output(self, messages):
+    def stream_openai_model_output(
+            self,
+            messages,
+            model_name=None,
+            image_detail=None,
+            temperature=None,
+            max_length=None,
+            reasoning_effort=None):
+        # Request values are captured on Tk's thread before this worker starts.
+        # The fallbacks preserve compatibility with direct callers/tests.
+        model_name = model_name or self.model_var.get()
+        image_detail = image_detail or self.image_detail_var.get()
+        temperature = self.temperature_var.get() if temperature is None else temperature
+        max_length = self.max_length_var.get() if max_length is None else max_length
+        reasoning_effort = self.reasoning_effort_var.get() if reasoning_effort is None else reasoning_effort
+
         async def streaming_chat_completion():
-            if self.model_var.get() in self.openai_models:
+            if model_name in self.openai_models:
                 streaming_client = self.openai_aclient
                 if not streaming_client:
-                    self.show_error_popup(self.get_provider_initialization_error(
+                    self.post_to_ui(self.show_error_popup, self.get_provider_initialization_error(
                         "OpenAI",
                         "OpenAI client is unavailable. Check the API key and OpenAI SDK installation in Settings."
                     ))
                     return
             else:
-                streaming_client = next((server.client for server in self.custom_servers if self.model_var.get() in server.models), None)
+                streaming_client = next((server.client for server in self.custom_servers if model_name in server.models), None)
                 if len(self.custom_servers) > 0 and self.custom_servers[0].client is None:
-                    self.show_error_popup("OpenAI package not found, custom servers will be disabled! Install the OpenAI API with `pip install openai`")
+                    self.post_to_ui(
+                        self.show_error_popup,
+                        "OpenAI package not found, custom servers will be disabled! Install the OpenAI API with `pip install openai`")
                     return
                 elif not streaming_client:
-                    error_message = f"Model {self.model_var.get()} not found in custom servers."
-                    self.show_error_popup(error_message)
+                    error_message = f"Model {model_name} not found in custom servers."
+                    self.post_to_ui(self.show_error_popup, error_message)
                     return
             try:
-                if self.model_var.get() in OPENAI_RESPONSES_MODELS:
-                    self.ensure_valid_reasoning_effort()
+                if model_name in OPENAI_RESPONSES_MODELS:
                     response = await streaming_client.responses.create(
-                        model=self.model_var.get(),
-                        input=self.convert_messages_for_responses_api(messages),
-                        max_output_tokens=self.max_length_var.get(),
-                        reasoning={"effort": self.reasoning_effort_var.get()})
+                        model=model_name,
+                        input=self.convert_messages_for_responses_api(messages, model_name, image_detail),
+                        max_output_tokens=max_length,
+                        reasoning={"effort": reasoning_effort})
                     content = self.get_text_from_responses_api_response(response)
                     if content:
-                        self.app.after(0, self.add_to_last_message, content)
+                        self.post_to_ui(self.add_to_last_message, content)
                     if not self.is_streaming_cancelled:
-                        self.app.after(0, self.add_empty_user_message)
+                        self.post_to_ui(self.add_empty_user_message)
                     return
 
-                if not self.model_supports_temperature():
-                    self.ensure_valid_reasoning_effort()
+                supports_temperature = (
+                    model_name not in OPENAI_REASONING_MODELS
+                    and model_name not in OPENAI_RESPONSES_MODELS)
+                if not supports_temperature:
                     request_args = dict(
-                        model=self.model_var.get(),
+                        model=model_name,
                         messages=messages,
-                        max_completion_tokens=self.max_length_var.get(),
+                        max_completion_tokens=max_length,
                         stream=True)
-                    if self.model_var.get() in OPENAI_REASONING_EFFORTS:
-                        request_args["reasoning_effort"] = self.reasoning_effort_var.get()
+                    if model_name in OPENAI_REASONING_EFFORTS:
+                        request_args["reasoning_effort"] = reasoning_effort
                     response = streaming_client.chat.completions.create(**request_args)
                 else:
-                    response = streaming_client.chat.completions.create(model=self.model_var.get(),
+                    response = streaming_client.chat.completions.create(model=model_name,
                         messages=messages,
-                        temperature=self.temperature_var.get(),
-                        max_tokens=self.max_length_var.get(),
+                        temperature=temperature,
+                        max_tokens=max_length,
                         stream=True)
             except Exception as e:
                 error_message = f"An error occurred: {e}"
-                loop.call_soon_threadsafe(self.show_error_popup, error_message)
+                self.post_to_ui(self.show_error_popup, error_message)
                 return
             try:
                 async for chunk in await response:
                     content = chunk.choices[0].delta.content
                     if content is not None:
-                        self.app.after(0, self.add_to_last_message, content)
+                        self.post_to_ui(self.add_to_last_message, content)
                     if self.is_streaming_cancelled:
                         break
             except Exception as e:
                 if "Incorrect API key" in str(e):
                     error_message = "API key is incorrect, please configure it in the settings."
-                    loop.call_soon_threadsafe(self.show_error_and_open_settings, error_message)
+                    self.post_to_ui(self.show_error_and_open_settings, error_message)
                 elif "No such organization" in str(e):
                     error_message = "Organization not found, please configure it in the settings."
-                    loop.call_soon_threadsafe(self.show_error_and_open_settings, error_message)
+                    self.post_to_ui(self.show_error_and_open_settings, error_message)
                 else:
                     error_message = f"An unexpected error occurred: {e}"
-                    loop.call_soon_threadsafe(self.show_error_popup, error_message)
+                    self.post_to_ui(self.show_error_popup, error_message)
             finally:
                 response.close()
                 print("Closed response")
             if not self.is_streaming_cancelled:
-                self.app.after(0, self.add_empty_user_message)
+                self.post_to_ui(self.add_empty_user_message)
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(streaming_chat_completion())
 
-    def stream_anthropic_model_output(self, messages, system_message):
+    def stream_anthropic_model_output(
+            self,
+            messages,
+            system_message,
+            model_name=None,
+            temperature=None,
+            max_length=None,
+            reasoning_effort=None):
+        model_name = model_name or self.model_var.get()
+        temperature = self.temperature_var.get() if temperature is None else temperature
+        max_length = self.max_length_var.get() if max_length is None else max_length
+        reasoning_effort = self.reasoning_effort_var.get() if reasoning_effort is None else reasoning_effort
         if self.config.get("anthropic", "api_key", fallback="") == "":
             error_message = "Anthropic API key is not configured. Please configure it in the settings."
-            self.show_error_and_open_settings(error_message)
+            self.post_to_ui(self.show_error_and_open_settings, error_message)
             return
         if not self.anthropic_client:
             error_message = "Anthropic API not installed. Please install the 'anthropic' package with the `pip install anthropic` command."
-            self.show_error_popup(error_message)
+            self.post_to_ui(self.show_error_popup, error_message)
             return
         async def streaming_anthropic_chat_completion():
             request_args = dict(
-                    model=self.model_var.get(),
-                    max_tokens=min(self.max_length_var.get(), 4000), # 4000 is the max tokens for anthropic
+                    model=model_name,
+                    max_tokens=min(max_length, 4000), # 4000 is the max tokens for anthropic
                     messages=messages,
                     system=system_message.strip())
-            if self.model_supports_temperature():
-                request_args["temperature"] = self.temperature_var.get()
-            if self.model_var.get() in ANTHROPIC_REASONING_EFFORTS:
-                self.ensure_valid_reasoning_effort()
-                request_args["output_config"] = {"effort": self.reasoning_effort_var.get()}
-                if self.model_var.get() in ANTHROPIC_ADAPTIVE_THINKING_MODELS:
+            if model_name not in ANTHROPIC_NO_TEMPERATURE_MODELS:
+                request_args["temperature"] = temperature
+            if model_name in ANTHROPIC_REASONING_EFFORTS:
+                request_args["output_config"] = {"effort": reasoning_effort}
+                if model_name in ANTHROPIC_ADAPTIVE_THINKING_MODELS:
                     request_args["thinking"] = {"type": "adaptive"}
 
             try:
                 with self.anthropic_client.messages.stream(**request_args) as stream:
                     for text in stream.text_stream:
-                        self.app.after(0, self.add_to_last_message, text)
+                        self.post_to_ui(self.add_to_last_message, text)
                         if self.is_streaming_cancelled:
                             break
             except Exception as e:
                 error_message = f"An unexpected error occurred: {e}"
-                loop.call_soon_threadsafe(self.show_error_popup, error_message)
+                self.post_to_ui(self.show_error_popup, error_message)
                 return
             if not self.is_streaming_cancelled:
-                self.app.after(0, self.add_empty_user_message)
+                self.post_to_ui(self.add_empty_user_message)
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(streaming_anthropic_chat_completion())
 
-    def stream_google_model_output(self, contents, config=None):
+    def stream_google_model_output(
+            self,
+            contents,
+            config=None,
+            model_name=None,
+            temperature=None,
+            max_length=None,
+            google_api_key=None):
+        model_name = model_name or self.model_var.get()
+        temperature = self.temperature_var.get() if temperature is None else temperature
+        max_length = self.max_length_var.get() if max_length is None else max_length
+        google_api_key = self.google_apikey_var.get() if google_api_key is None else google_api_key
         if self.google_client is None:
-            if self.google_apikey_var.get().strip():
+            if google_api_key.strip():
                 error_message = self.get_provider_initialization_error(
                     "Google",
                     "Google GenAI client is unavailable. Check the API key and `google-genai` installation in Settings."
                 )
             else:
                 error_message = "Google API key is not configured. Please configure it in the settings."
-            self.show_error_and_open_settings(error_message)
+            self.post_to_ui(self.show_error_and_open_settings, error_message)
             return
         async def streaming_google_chat_completion():
             try:
@@ -988,28 +1080,28 @@ class ChatWindow:
                 # Create or update config with temperature and max_tokens
                 if config is None:
                     generation_config = types.GenerateContentConfig(
-                        temperature=self.temperature_var.get(),
-                        max_output_tokens=self.max_length_var.get()
+                        temperature=temperature,
+                        max_output_tokens=max_length
                     )
                 else:
                     # Update existing config with our parameters
-                    config.temperature = self.temperature_var.get()
-                    config.max_output_tokens = self.max_length_var.get()
+                    config.temperature = temperature
+                    config.max_output_tokens = max_length
                     generation_config = config
                 
                 # Stream the response
                 for chunk in self.google_client.models.generate_content_stream(
-                    model=self.model_var.get(),
+                    model=model_name,
                     contents=contents,
                     config=generation_config
                 ):
                     if chunk.text:
-                        self.app.after(0, self.add_to_last_message, chunk.text)
+                        self.post_to_ui(self.add_to_last_message, chunk.text)
                     if self.is_streaming_cancelled:
                         break
             except ImportError as e:
                 error_message = "Google GenAI SDK not properly installed. Please install with: pip install google-genai"
-                loop.call_soon_threadsafe(self.show_error_popup, error_message)
+                self.post_to_ui(self.show_error_popup, error_message)
                 return
             except Exception as e:
                 if "API_KEY_INVALID" in str(e) or "authentication" in str(e).lower():
@@ -1017,13 +1109,13 @@ class ChatWindow:
                 elif "quota" in str(e).lower() or "rate" in str(e).lower():
                     error_message = f"Google API quota exceeded or rate limited: {e}"
                 elif "model" in str(e).lower() and "not found" in str(e).lower():
-                    error_message = f"Google model '{self.model_var.get()}' not available. Please select a different model."
+                    error_message = f"Google model '{model_name}' not available. Please select a different model."
                 else:
                     error_message = f"Google API error: {e}"
-                loop.call_soon_threadsafe(self.show_error_popup, error_message)
+                self.post_to_ui(self.show_error_popup, error_message)
                 return
             if not self.is_streaming_cancelled:
-                self.app.after(0, self.add_empty_user_message)
+                self.post_to_ui(self.add_empty_user_message)
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(streaming_google_chat_completion())
@@ -1090,12 +1182,15 @@ class ChatWindow:
                 dropdown_menu.add_separator()
             dropdown_menu.add_command(
                 label=group_name,
-                state="disabled",
+                # A disabled Tk menu item gets a gray embossed shadow. Keep
+                # headings inert with a no-op command instead so they remain
+                # crisp and readable in dark mode.
+                command=lambda: None,
                 font="TkFixedFont")
             if group_index == 0:
                 dropdown_menu.add_command(
                     label=self.format_model_columns_header(model_name_width),
-                    state="disabled",
+                    command=lambda: None,
                     font="TkFixedFont")
             for model in models:
                 dropdown_menu.add_radiobutton(
@@ -1793,6 +1888,8 @@ class ChatWindow:
             fieldbackground=colors["input"],
             foreground=colors["text"],
             insertcolor=colors["text"],
+            selectbackground=colors["selection"],
+            selectforeground=colors["text"],
             bordercolor=colors["border"],
             lightcolor=colors["border"],
             darkcolor=colors["border"],
@@ -1870,7 +1967,7 @@ class ChatWindow:
                 self.style_tk_text(widget)
             elif isinstance(widget, tk.Canvas):
                 widget.configure(
-                    background=colors["window"],
+                    background=colors["surface"],
                     highlightbackground=colors["border"],
                     highlightcolor=colors["accent"])
             elif isinstance(widget, tk.Label):
@@ -1914,9 +2011,12 @@ class ChatWindow:
             import ctypes
 
             window.update_idletasks()
-            hwnd = window.winfo_id()
+            hwnd = ctypes.c_void_p(window.winfo_id())
             dark_value = ctypes.c_int(1 if self.dark_mode_var.get() else 0)
             dwmapi = ctypes.windll.dwmapi
+            dwmapi.DwmSetWindowAttribute.argtypes = [
+                ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint]
+            dwmapi.DwmSetWindowAttribute.restype = ctypes.c_int
             # 20 is used by current Windows versions; 19 is the older fallback.
             for attribute in (20, 19):
                 result = dwmapi.DwmSetWindowAttribute(
@@ -1931,7 +2031,7 @@ class ChatWindow:
                 red = int(hex_color[1:3], 16)
                 green = int(hex_color[3:5], 16)
                 blue = int(hex_color[5:7], 16)
-                return ctypes.c_int(red | (green << 8) | (blue << 16))
+                return ctypes.c_uint(red | (green << 8) | (blue << 16))
 
             caption_color = colorref(self.theme_colors["window"])
             caption_text_color = colorref(self.theme_colors["text"])
