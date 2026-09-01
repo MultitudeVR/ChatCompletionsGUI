@@ -28,6 +28,36 @@ from prompts import file_naming_prompt
 from utils import convert_messages_for_model, convert_messages_for_google, parse_and_create_image_messages, count_tokens, convert_text_to_tokens, convert_tokens_to_text
 from custom_server import CustomServer
 
+
+LIGHT_THEME = {
+    "window": "#f0f0f0",
+    "surface": "#f5f5f5",
+    "surface_alt": "#e5e5e5",
+    "input": "#ffffff",
+    "text": "#1f1f1f",
+    "muted_text": "#666666",
+    "border": "#b8b8b8",
+    "selection": "#cce4ff",
+    "accent": "#0078d4",
+    "accent_active": "#005a9e",
+    "disabled": "#a0a0a0",
+}
+
+DARK_THEME = {
+    "window": "#1e1e1e",
+    "surface": "#252526",
+    "surface_alt": "#2d2d30",
+    "input": "#1f1f1f",
+    "text": "#f1f1f1",
+    "muted_text": "#b8b8b8",
+    "border": "#454545",
+    "selection": "#264f78",
+    "accent": "#3794ff",
+    "accent_active": "#1f6fbf",
+    "disabled": "#707070",
+}
+
+
 class ChatWindow:
     def __init__(self, root, config, os_name):
         self.app = root
@@ -36,6 +66,11 @@ class ChatWindow:
         # Initialize the main application window
         self.app.geometry("800x600")
         self.app.title("Chat Completions GUI")
+
+        self.style = ttk.Style(self.app)
+        self.light_ttk_theme = self.style.theme_use()
+        self.theme_colors = LIGHT_THEME
+        self.tk_menus = []
 
         self.is_streaming_cancelled = False
 
@@ -99,6 +134,7 @@ class ChatWindow:
         ttk.Label(self.main_frame, text="System message:").grid(row=0, column=0, sticky="w")
         self.system_message_widget = tk.Text(self.main_frame, wrap=tk.WORD, height=5, undo=True)
         self.system_message_widget.grid(row=0, column=1, sticky="we", pady=3)
+        self.style_tk_text(self.system_message_widget)
         self.system_message_widget.insert(tk.END, system_message.get())
         self.system_message_widget.bind("<<Paste>>", lambda event: self.handle_paste(event))
         self.system_message_widget.bind("<Control-a>", lambda event: self.safe_select_all(event))
@@ -188,6 +224,7 @@ class ChatWindow:
         self.chat_files.insert(0, default_chat_file)
         self.chat_file_dropdown = ttk.OptionMenu(self.configuration_frame, self.chat_filename_var, default_chat_file, *self.chat_files)
         self.chat_file_dropdown.grid(row=config_row, column=1, sticky="w")
+        self.register_tk_menu(self.chat_file_dropdown["menu"])
 
         # Add a button to load the selected chat log
         self.load_button = ttk.Button(self.configuration_frame, text="Load Chat", command=self.load_chat_history)
@@ -205,19 +242,9 @@ class ChatWindow:
         self.hamburger_button = ttk.Button(self.configuration_frame, text="≡", command=self.toggle_settings_window)
         self.hamburger_button.grid(row=config_row, column=9, padx=10, pady=10, sticky="w")
 
-        self.default_bg_color = self.get_default_bg_color(self.app)
-        # Create styles for light and dark modes
-        self.style = ttk.Style(self.app)
-        self.style.configure("Dark.TFrame", background="#2c2c2c")
-        self.style.configure("Dark.TLabel", background="#2c2c2c", foreground="#ffffff")
-        # style.configure("Dark.TButton", background="#2c2c2c", foreground="2c2c2c")
-        self.style.configure("Dark.TOptionMenu", background="#2c2c2c", foreground="#ffffff")
-        self.style.configure("Dark.TCheckbutton", background="#2c2c2c", foreground="#ffffff")
-
         self.dark_mode_var = tk.BooleanVar()
-        if self.load_dark_mode_state():
-            self.dark_mode_var.set(True)
-            self.toggle_dark_mode()
+        self.dark_mode_var.set(self.load_dark_mode_state())
+        self.apply_theme()
 
         self.file_naming_model_var = tk.StringVar(
             value=self.config.get("app", "file_naming_model", fallback=DEFAULT_FILE_NAMING_MODEL))
@@ -1023,6 +1050,8 @@ class ChatWindow:
         menu.add_command(label="<new-log>", command=lambda value="<new-log>": self.chat_filename_var.set(value))
         for file in self.chat_files:
             menu.add_command(label=file, command=lambda value=file: self.chat_filename_var.set(value))
+        self.register_tk_menu(menu)
+        self.style_tk_menu(menu)
 
     def update_models_dropdown(self):
         current_model = self.model_var.get()
@@ -1053,6 +1082,7 @@ class ChatWindow:
 
         dropdown_menu = self.model_dropdown['menu']
         dropdown_menu.delete(0, "end")
+        self.register_tk_menu(dropdown_menu)
         all_models = [model for _, models in model_groups for model in models]
         model_name_width = max((len(model) for model in all_models), default=12)
         for group_index, (group_name, models) in enumerate(model_groups):
@@ -1074,6 +1104,7 @@ class ChatWindow:
                     variable=self.model_var,
                     value=model,
                     font="TkFixedFont")
+        self.style_tk_menu(dropdown_menu)
 
     @staticmethod
     def format_model_price(price):
@@ -1185,6 +1216,7 @@ class ChatWindow:
         message["role_button"].grid(row=row, column=0, sticky="nw")
         message["content_widget"] = tk.Text(self.inner_frame, wrap=tk.WORD, height=1, undo=True)
         message["content_widget"].grid(row=row, column=1, sticky="we")
+        self.style_tk_text(message["content_widget"])
         message["content_widget"].insert(tk.END, content)
         message["content_widget"].bind("<KeyRelease>", lambda event, content_widget=message["content_widget"]: self.update_content_height(event, content_widget))
         message["content_widget"].bind("<<Paste>>", lambda event: self.handle_paste(event))
@@ -1408,7 +1440,7 @@ class ChatWindow:
         close_button = ttk.Button(self.model_settings_frame, text="Close", command=self.close_model_settings_window)
         close_button.grid(row=row, column=0, columnspan=3, pady=(10, 0))
         self.model_settings_frame.columnconfigure(1, weight=1)
-        self.toggle_dark_mode()
+        self.apply_theme()
 
     def close_model_settings_window(self):
         if self.model_settings_window is not None:
@@ -1584,6 +1616,7 @@ class ChatWindow:
         error_label = ttk.Label(error_popup, text=message, wraplength=300)
         error_label.pack(padx=20, pady=20)
 
+        self.apply_theme()
         error_popup.focus_force()
         self.center_popup_over_chat_window(error_popup, self.app, 0, -150)
 
@@ -1704,65 +1737,229 @@ class ChatWindow:
         return self.config.getboolean("app", "dark_mode", fallback=False)
 
     def toggle_dark_mode(self):
-        if self.dark_mode_var.get():
-            self.app.configure(bg="#2c2c2c")
-            self.main_frame.configure(style="Dark.TFrame")
-            self.configuration_frame.configure(style="Dark.TFrame")
-            self.chat_frame.configure(bg="#2c2c2c") # Change chat_frame background color
-            self.inner_frame.configure(style="Dark.TFrame")
-
-            for widget in self.main_frame.winfo_children():
-                if isinstance(widget, (ttk.Label, ttk.OptionMenu, ttk.Checkbutton)):
-                    widget.configure(style="Dark." + widget.winfo_class())
-                elif isinstance(widget, tk.Label) and widget == self.resize_handle:
-                    widget.configure(bg="#2c2c2c", fg="#666666")
-            for widget in self.configuration_frame.winfo_children():
-                if isinstance(widget, (ttk.Label, ttk.OptionMenu, ttk.Checkbutton)):
-                    widget.configure(style="Dark." + widget.winfo_class())
-            if self.settings_frame is not None:
-                self.settings_frame.configure(style="Dark.TFrame")
-                for widget in self.settings_frame.winfo_children():
-                    if isinstance(widget, (ttk.Label, ttk.OptionMenu, ttk.Checkbutton)):
-                        widget.configure(style="Dark." + widget.winfo_class())
-            if self.model_settings_frame is not None:
-                self.model_settings_frame.configure(style="Dark.TFrame")
-                for widget in self.model_settings_frame.winfo_children():
-                    if isinstance(widget, (ttk.Label, ttk.OptionMenu, ttk.Checkbutton)):
-                        widget.configure(style="Dark." + widget.winfo_class())
-        else:
-            self.app.configure(bg=self.default_bg_color)
-            self.main_frame.configure(style="")
-            self.configuration_frame.configure(style="")
-            self.chat_frame.configure(bg=self.default_bg_color) # Reset chat_frame background color
-            self.inner_frame.configure(style="")
-
-            for widget in self.main_frame.winfo_children():
-                if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
-                    widget.configure(style=widget.winfo_class())
-                elif isinstance(widget, tk.Label) and widget == self.resize_handle:
-                    widget.configure(bg=self.default_bg_color, fg="gray")
-            for widget in self.configuration_frame.winfo_children():
-                if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
-                    widget.configure(style=widget.winfo_class())
-            if self.settings_frame is not None:
-                self.settings_frame.configure(style="")
-                for widget in self.settings_frame.winfo_children():
-                    if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
-                        widget.configure(style=widget.winfo_class())
-            if self.model_settings_frame is not None:
-                self.model_settings_frame.configure(style="")
-                for widget in self.model_settings_frame.winfo_children():
-                    if isinstance(widget, (ttk.Label, ttk.Button, ttk.OptionMenu, ttk.Checkbutton, ttk.Scrollbar)):
-                        widget.configure(style=widget.winfo_class())
+        self.apply_theme()
         self.save_dark_mode_state()
 
-    def get_default_bg_color(self, root):
-        # Create a temporary button widget to get the default background color
-        temp_button = tk.Button(root)
-        default_bg_color = temp_button.cget('bg')
-        # Destroy the temporary button
-        temp_button.destroy()
-        return default_bg_color
+    def configure_ttk_styles(self, colors):
+        """Configure the shared ttk palette used by every window in the app."""
+        self.style.configure(".", background=colors["surface"], foreground=colors["text"])
+        self.style.configure("TFrame", background=colors["surface"])
+        self.style.configure("TLabel", background=colors["surface"], foreground=colors["text"])
+        self.style.configure(
+            "TButton",
+            background=colors["surface_alt"],
+            foreground=colors["text"],
+            bordercolor=colors["border"],
+            lightcolor=colors["border"],
+            darkcolor=colors["border"],
+            padding=(8, 4))
+        self.style.map(
+            "TButton",
+            background=[
+                ("disabled", colors["surface_alt"]),
+                ("pressed", colors["accent_active"]),
+                ("active", colors["accent"])],
+            foreground=[("disabled", colors["disabled"]), ("active", "#ffffff")])
+        self.style.configure(
+            "TCheckbutton",
+            background=colors["surface"],
+            foreground=colors["text"])
+        self.style.map(
+            "TCheckbutton",
+            background=[("active", colors["surface"])],
+            foreground=[("disabled", colors["disabled"])],
+            indicatorcolor=[
+                ("disabled", colors["surface_alt"]),
+                ("selected", colors["accent"]),
+                ("active", colors["accent"])])
+        self.style.configure(
+            "TMenubutton",
+            background=colors["surface_alt"],
+            foreground=colors["text"],
+            bordercolor=colors["border"],
+            lightcolor=colors["border"],
+            darkcolor=colors["border"],
+            padding=(6, 3))
+        self.style.configure("TOptionMenu", background=colors["surface_alt"], foreground=colors["text"])
+        self.style.map(
+            "TMenubutton",
+            background=[
+                ("disabled", colors["surface_alt"]),
+                ("pressed", colors["accent_active"]),
+                ("active", colors["accent"])],
+            foreground=[("disabled", colors["disabled"]), ("active", "#ffffff")])
+        self.style.configure(
+            "TEntry",
+            fieldbackground=colors["input"],
+            foreground=colors["text"],
+            insertcolor=colors["text"],
+            bordercolor=colors["border"],
+            lightcolor=colors["border"],
+            darkcolor=colors["border"],
+            padding=(5, 4))
+        self.style.map(
+            "TEntry",
+            fieldbackground=[("disabled", colors["surface_alt"]), ("focus", colors["input"])],
+            foreground=[("disabled", colors["disabled"])],
+            bordercolor=[("focus", colors["accent"])])
+        self.style.configure(
+            "TCombobox",
+            fieldbackground=colors["input"],
+            background=colors["surface_alt"],
+            foreground=colors["text"],
+            arrowcolor=colors["text"],
+            bordercolor=colors["border"],
+            lightcolor=colors["border"],
+            darkcolor=colors["border"],
+            padding=(5, 3))
+        self.style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", colors["input"]), ("disabled", colors["surface_alt"])],
+            foreground=[("disabled", colors["disabled"]), ("readonly", colors["text"])],
+            selectbackground=[("!focus", colors["selection"]), ("focus", colors["selection"])],
+            selectforeground=[("!focus", colors["text"]), ("focus", colors["text"])])
+        self.style.configure(
+            "TScale",
+            background=colors["surface"],
+            troughcolor=colors["surface_alt"],
+            bordercolor=colors["border"],
+            lightcolor=colors["border"],
+            darkcolor=colors["border"])
+        self.style.configure(
+            "TScrollbar",
+            background=colors["surface_alt"],
+            troughcolor=colors["input"],
+            arrowcolor=colors["muted_text"],
+            bordercolor=colors["border"],
+            lightcolor=colors["border"],
+            darkcolor=colors["border"])
+        self.style.map("TScrollbar", background=[("active", colors["accent"]), ("pressed", colors["accent_active"])])
+        self.style.configure("TSeparator", background=colors["border"])
+        self.style.configure(
+            "TLabelframe",
+            background=colors["surface"],
+            bordercolor=colors["border"],
+            lightcolor=colors["border"],
+            darkcolor=colors["border"])
+        self.style.configure(
+            "TLabelframe.Label",
+            background=colors["surface"],
+            foreground=colors["text"])
+
+    def style_tk_text(self, widget):
+        colors = self.theme_colors
+        widget.configure(
+            background=colors["input"],
+            foreground=colors["text"],
+            insertbackground=colors["text"],
+            selectbackground=colors["selection"],
+            selectforeground=colors["text"],
+            highlightbackground=colors["border"],
+            highlightcolor=colors["accent"],
+            highlightthickness=1,
+            borderwidth=0,
+            relief="flat")
+
+    def style_tk_widget(self, widget):
+        """Apply colors to classic Tk widgets, which do not follow ttk styles."""
+        colors = self.theme_colors
+        try:
+            if isinstance(widget, (tk.Tk, tk.Toplevel, tk.Frame)):
+                widget.configure(background=colors["window"])
+            elif isinstance(widget, tk.Text):
+                self.style_tk_text(widget)
+            elif isinstance(widget, tk.Canvas):
+                widget.configure(
+                    background=colors["window"],
+                    highlightbackground=colors["border"],
+                    highlightcolor=colors["accent"])
+            elif isinstance(widget, tk.Label):
+                widget.configure(
+                    background=colors["surface"],
+                    foreground=colors["muted_text"])
+        except tk.TclError:
+            pass
+
+        try:
+            children = widget.winfo_children()
+        except tk.TclError:
+            children = []
+        for child in children:
+            self.style_tk_widget(child)
+
+    def register_tk_menu(self, menu):
+        if menu not in self.tk_menus:
+            self.tk_menus.append(menu)
+
+    def style_tk_menu(self, menu):
+        colors = self.theme_colors
+        try:
+            menu.configure(
+                background=colors["surface"],
+                foreground=colors["text"],
+                activebackground=colors["accent"],
+                activeforeground="#ffffff",
+                disabledforeground=colors["muted_text"],
+                selectcolor=colors["accent"],
+                borderwidth=0,
+                relief="flat")
+        except tk.TclError:
+            pass
+
+    def apply_windows_titlebar_theme(self, window):
+        """Use the Windows dark caption when available; silently no-op elsewhere."""
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+
+            window.update_idletasks()
+            hwnd = window.winfo_id()
+            dark_value = ctypes.c_int(1 if self.dark_mode_var.get() else 0)
+            dwmapi = ctypes.windll.dwmapi
+            # 20 is used by current Windows versions; 19 is the older fallback.
+            for attribute in (20, 19):
+                result = dwmapi.DwmSetWindowAttribute(
+                    hwnd,
+                    attribute,
+                    ctypes.byref(dark_value),
+                    ctypes.sizeof(dark_value))
+                if result == 0:
+                    break
+
+            def colorref(hex_color):
+                red = int(hex_color[1:3], 16)
+                green = int(hex_color[3:5], 16)
+                blue = int(hex_color[5:7], 16)
+                return ctypes.c_int(red | (green << 8) | (blue << 16))
+
+            caption_color = colorref(self.theme_colors["window"])
+            caption_text_color = colorref(self.theme_colors["text"])
+            dwmapi.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(caption_color), ctypes.sizeof(caption_color))
+            dwmapi.DwmSetWindowAttribute(hwnd, 36, ctypes.byref(caption_text_color), ctypes.sizeof(caption_text_color))
+        except (AttributeError, OSError, tk.TclError):
+            pass
+
+    def apply_theme(self):
+        """Apply the current palette to ttk, classic Tk widgets, menus, and captions."""
+        is_dark = bool(self.dark_mode_var.get())
+        self.theme_colors = DARK_THEME if is_dark else LIGHT_THEME
+
+        try:
+            target_theme = "clam" if is_dark else self.light_ttk_theme
+            if self.style.theme_use() != target_theme:
+                self.style.theme_use(target_theme)
+        except tk.TclError:
+            pass
+
+        self.configure_ttk_styles(self.theme_colors)
+        self.style_tk_widget(self.app)
+        for menu in list(self.tk_menus):
+            self.style_tk_menu(menu)
+        self.apply_windows_titlebar_theme(self.app)
+        for window in self.app.winfo_children():
+            if isinstance(window, tk.Toplevel):
+                self.apply_windows_titlebar_theme(window)
     
     def create_undoable_entry(self, parent, variable, width=60):
         entry = ttk.Entry(parent, textvariable=variable, width=width)
@@ -1974,7 +2171,7 @@ class ChatWindow:
                 self.prompt_paste_from_clipboard(event, entry))
             openai_apikey_entry.bind("<FocusOut>", self.update_previous_focused_widget)
 
-        self.toggle_dark_mode()
+        self.apply_theme()
         self.center_popup_over_chat_window(self.settings_window, self.app)
         self.settings_window.focus_force()
 
@@ -2240,6 +2437,8 @@ class ChatWindow:
         """Show context menu for adding images when drag-and-drop is not available"""
         menu = tk.Menu(self.app, tearoff=0)
         menu.add_command(label="Insert Image", command=lambda: self.add_image_to_message(widget))
+        self.register_tk_menu(menu)
+        self.style_tk_menu(menu)
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
