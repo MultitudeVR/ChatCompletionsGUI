@@ -2,6 +2,10 @@
 SYSTEM_MESSAGE_DEFAULT_TEXT = ""
 DEFAULT_FILE_NAMING_MODEL="gpt-4o-mini" # if empty, won't name files automatically
 OPENAI_MODELS = [
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.6",
     "gpt-5.5",
     "gpt-5.5-pro",
     "gpt-5.4",
@@ -102,6 +106,10 @@ GOOGLE_VISION_MODELS = [
     "gemini-pro-latest",
 ]
 OPENAI_VISION_MODELS = [
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.6",
     "gpt-5.5",
     "gpt-5.5-pro",
     "gpt-5.4",
@@ -170,6 +178,10 @@ ANTHROPIC_VISION_MODELS = [
     'claude-3-opus-20240229',
 ]
 GPT5_MODELS = [
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.6",
     "gpt-5.5",
     "gpt-5.5-pro",
     "gpt-5.4",
@@ -185,6 +197,10 @@ GPT5_MODELS = [
     "gpt-5-nano",
 ]
 OPENAI_REASONING_EFFORTS = {
+    "gpt-5.6-sol": ["none", "low", "medium", "high", "xhigh", "max"],
+    "gpt-5.6-terra": ["none", "low", "medium", "high", "xhigh", "max"],
+    "gpt-5.6-luna": ["none", "low", "medium", "high", "xhigh", "max"],
+    "gpt-5.6": ["none", "low", "medium", "high", "xhigh", "max"],
     "gpt-5.5": ["none", "low", "medium", "high", "xhigh"],
     "gpt-5.5-pro": ["medium", "high", "xhigh"],
     "gpt-5.4": ["none", "low", "medium", "high", "xhigh"],
@@ -216,12 +232,20 @@ ANTHROPIC_ADAPTIVE_THINKING_MODELS = [
     "claude-sonnet-4-6",
 ]
 OPENAI_RESPONSES_MODELS = [
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.6",
     "gpt-5.5-pro",
     "gpt-5.4-pro",
     "gpt-5.2-pro",
     "gpt-5-pro",
 ]
 MODEL_INFO = {
+    "gpt-5.6-sol": {"max_tokens": 1050000, "input_price": 0.004, "output_price": 0.02},
+    "gpt-5.6-terra": {"max_tokens": 1050000, "input_price": 0.002, "output_price": 0.012},
+    "gpt-5.6-luna": {"max_tokens": 1050000, "input_price": 0.0002, "output_price": 0.0012},
+    "gpt-5.6": {"max_tokens": 1050000, "input_price": 0.004, "output_price": 0.02},
     "gpt-5.5": {"max_tokens": 1050000, "input_price": 0.005, "output_price": 0.03},
     "gpt-5.5-pro": {"max_tokens": 1050000, "input_price": 0.03, "output_price": 0.18},
     "gpt-5.4": {"max_tokens": 1050000, "input_price": 0.0025, "output_price": 0.015},
@@ -277,6 +301,18 @@ MODEL_INFO = {
     "claude-3-haiku-20240307": {"max_tokens": 128000, "input_price": 0.00025, "output_price": 0.00125},
     "claude-3-opus-20240229": {"max_tokens": 128000, "input_price": 0.015, "output_price": 0.075},
     "claude-3-sonnet-20240229": {"max_tokens": 128000, "input_price": 0.003, "output_price": 0.015},
+    # Google prices are stored per 1K tokens, like the OpenAI and Anthropic
+    # prices above. The dropdown converts these values to $/MTok.
+    "gemini-3.7-flash": {"max_tokens": 1048576, "input_price": 0.00075, "output_price": 0.00375},
+    "gemini-3.6-flash": {"max_tokens": 1048576, "input_price": 0.00075, "output_price": 0.00375},
+    "gemini-3.5-flash": {"max_tokens": 1048576, "input_price": 0.0015, "output_price": 0.009},
+    "gemini-3.5-flash-lite": {"max_tokens": 1048576, "input_price": 0.0003, "output_price": 0.0025},
+    "gemini-3.1-pro-preview": {"max_tokens": 1048576, "input_price": 0.002, "output_price": 0.012},
+    "gemini-3.1-flash-lite-preview": {"max_tokens": 1048576, "input_price": 0.00025, "output_price": 0.0015},
+    "gemini-3.1-flash-lite": {"max_tokens": 1048576, "input_price": 0.00025, "output_price": 0.0015},
+    "gemini-2.5-flash": {"max_tokens": 1048576, "input_price": 0.0003, "output_price": 0.0025},
+    "gemini-2.5-flash-lite": {"max_tokens": 1048576, "input_price": 0.0001, "output_price": 0.0004},
+    "gemini-2.5-pro": {"max_tokens": 1048576, "input_price": 0.00125, "output_price": 0.01},
 }
 # Estimation for high detail image cost based on a 1024x1024 image
 # todo: get the actual image sizes for a more accurate estimation

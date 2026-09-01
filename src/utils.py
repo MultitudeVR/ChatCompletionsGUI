@@ -323,7 +323,7 @@ def convert_messages_for_model(model, messages, image_detail="low"):
                 clean_message = {k: v for k, v in message.items() if k != "local_images"}
                 new_messages.append(clean_message)
         return new_messages, None
-    elif model in ANTHROPIC_MODELS:
+    elif model in ANTHROPIC_MODELS or model.startswith("claude-"):
         # Anthropic API has a bunch of extra requirements not present in OpenAI's API
         anthropic_messages = []
         system_content = ""
@@ -383,9 +383,9 @@ def convert_messages_for_model(model, messages, image_detail="low"):
         if len(anthropic_messages) == 0 or anthropic_messages[0]["role"] == "assistant":
             anthropic_messages.insert(0, {"role": "user", "content": "<no message>"})
         return anthropic_messages, system_content
-    elif model in GOOGLE_MODELS:
+    elif model in GOOGLE_MODELS or model.startswith("gemini-"):
         # For Google vision models, convert to the expected format with image URLs
-        if model in GOOGLE_VISION_MODELS and image_detail != "none":
+        if (model in GOOGLE_VISION_MODELS or model.startswith("gemini-")) and image_detail != "none":
             new_messages = []
             for message in messages:
                 if message["role"] == "user" and "content" in message:

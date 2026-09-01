@@ -66,6 +66,14 @@ class ChatWindow:
         self.google_client = None
         self.provider_clients_loaded = False
         self.provider_initialization_errors = []
+        self.settings_save_after_id = None
+        self.provider_initialization_after_id = None
+        self.model_dropdown_after_id = None
+        self.model_refresh_queue = queue.Queue()
+        self.model_refresh_in_progress = set()
+        self.model_refresh_poll_after_id = None
+        self.model_refresh_buttons = {}
+        self.settings_undo_traces = []
         self.custom_servers = []
         custom_server_count = 0
         while config.has_section(f"custom_server_{custom_server_count}"):
@@ -78,7 +86,7 @@ class ChatWindow:
                 api_key,
                 org_id,
                 custom_models,
-                on_config_changed=lambda *args: self.on_config_changed(),
+                on_config_changed=lambda *args: self.on_config_changed(*args),
                 initialize_client=False))
             custom_server_count += 1
 
@@ -211,7 +219,9 @@ class ChatWindow:
             self.dark_mode_var.set(True)
             self.toggle_dark_mode()
 
-        self.file_naming_model_var = tk.StringVar(value=DEFAULT_FILE_NAMING_MODEL)
+        self.file_naming_model_var = tk.StringVar(
+            value=self.config.get("app", "file_naming_model", fallback=DEFAULT_FILE_NAMING_MODEL))
+        self.file_naming_model_var.trace("w", self.on_config_changed)
 
         # Add a separator
         ttk.Separator(self.configuration_frame, orient='horizontal').grid(row=config_row+1, column=0, columnspan=10, sticky="we", pady=3)
@@ -247,12 +257,213 @@ class ChatWindow:
         self.openai_orgid_var = tk.StringVar(value=self.config.get("openai", "organization", fallback=""))
         self.anthropic_apikey_var = tk.StringVar(value=self.config.get("anthropic", "api_key", fallback=""))
         self.google_apikey_var = tk.StringVar(value=self.config.get("google", "api_key", fallback=""))
+        self.openai_models = self.get_configured_models("openai", OPENAI_MODELS)
+        self.anthropic_models = self.get_configured_models("anthropic", ANTHROPIC_MODELS)
+        self.google_models = self.get_configured_models("google", GOOGLE_MODELS)
+        self.openai_models_var = tk.StringVar(value=", ".join(self.openai_models))
+        self.anthropic_models_var = tk.StringVar(value=", ".join(self.anthropic_models))
+        self.google_models_var = tk.StringVar(value=", ".join(self.google_models))
         self.openai_apikey_var.trace("w", self.on_config_changed)
         self.openai_orgid_var.trace("w", self.on_config_changed)
         self.anthropic_apikey_var.trace("w", self.on_config_changed)
         self.google_apikey_var.trace("w", self.on_config_changed)
+        self.openai_models_var.trace("w", self.on_config_changed)
+        self.anthropic_models_var.trace("w", self.on_config_changed)
+        self.google_models_var.trace("w", self.on_config_changed)
+
+    def get_configured_models(self, section, defaults):
+        if not self.config.has_option(section, "models"):
+            return list(defaults)
+        return self.parse_models(self.config.get(section, "models"))
+
+    @staticmethod
+    def parse_models(models_text):
+        return [model.strip() for model in models_text.split(",") if model.strip()]
+
+    def update_model_lists_from_variables(self):
+        self.openai_models = self.parse_models(self.openai_models_var.get())
+        self.anthropic_models = self.parse_models(self.anthropic_models_var.get())
+        self.google_models = self.parse_models(self.google_models_var.get())
+        for custom_server in self.custom_servers:
+            custom_server.update_models()
+
+    def is_model_list_variable(self, variable_name):
+        model_variables = {
+            str(self.openai_models_var),
+            str(self.anthropic_models_var),
+            str(self.google_models_var),
+        }
+        model_variables.update(str(server.models_var) for server in self.custom_servers)
+        return variable_name in model_variables
+
+    def schedule_model_dropdown_update(self):
+        if self.model_dropdown_after_id is not None:
+            self.app.after_cancel(self.model_dropdown_after_id)
+        self.model_dropdown_after_id = self.app.after(150, self.run_scheduled_model_dropdown_update)
+
+    def run_scheduled_model_dropdown_update(self):
+        self.model_dropdown_after_id = None
+        self.update_models_dropdown()
+
+    def schedule_provider_initialization(self):
+        if self.provider_initialization_after_id is not None:
+            self.app.after_cancel(self.provider_initialization_after_id)
+        self.provider_initialization_after_id = self.app.after(
+            400, self.start_provider_client_initialization)
+
+    def schedule_settings_save(self):
+        if self.settings_save_after_id is not None:
+            self.app.after_cancel(self.settings_save_after_id)
+        self.settings_save_after_id = self.app.after(500, self.save_api_key)
+
+    def refresh_models(self, provider_key):
+        """Refresh one provider's model field without blocking the Tk event loop."""
+        if provider_key in self.model_refresh_in_progress:
+            return
+
+        provider_config = self.get_provider_config()
+        self.model_refresh_in_progress.add(provider_key)
+        button = self.model_refresh_buttons.get(provider_key)
+        if button is not None:
+            button.configure(state="disabled", text="...")
+
+        Thread(
+            target=self.fetch_models_in_background,
+            args=(provider_key, provider_config),
+            daemon=True).start()
+        if self.model_refresh_poll_after_id is None:
+            self.model_refresh_poll_after_id = self.app.after(50, self.poll_model_refresh_results)
+
+    @staticmethod
+    def model_id_from_api_model(model):
+        model_id = getattr(model, "id", None)
+        if model_id is None and isinstance(model, dict):
+            model_id = model.get("id") or model.get("name")
+        if not model_id:
+            model_id = getattr(model, "name", None)
+        if not model_id:
+            return ""
+        return str(model_id).removeprefix("models/")
+
+    @staticmethod
+    def deduplicate_models(model_ids):
+        return list(dict.fromkeys(model_id for model_id in model_ids if model_id))
+
+    def fetch_models_in_background(self, provider_key, provider_config):
+        try:
+            if provider_key == "openai":
+                from openai import OpenAI
+                client = OpenAI(
+                    api_key=provider_config["openai_api_key"],
+                    organization=provider_config["openai_org_id"] or None)
+                model_ids = [self.model_id_from_api_model(model) for model in client.models.list()]
+            elif provider_key == "anthropic":
+                import anthropic
+                client = anthropic.Anthropic(api_key=provider_config["anthropic_api_key"])
+                model_ids = [self.model_id_from_api_model(model) for model in client.models.list()]
+            elif provider_key == "google":
+                from google import genai
+                client = genai.Client(api_key=provider_config["google_api_key"])
+                model_ids = []
+                for model in client.models.list():
+                    supported_actions = getattr(model, "supported_actions", None)
+                    if supported_actions is None and isinstance(model, dict):
+                        supported_actions = model.get("supportedActions") or model.get("supported_actions")
+                    if supported_actions and "generateContent" not in supported_actions:
+                        continue
+                    model_id = self.model_id_from_api_model(model)
+                    if model_id.startswith("gemini-"):
+                        model_ids.append(model_id)
+            elif provider_key.startswith("custom_server_"):
+                server_index = int(provider_key.rsplit("_", 1)[1])
+                server_config = provider_config["custom_servers"][server_index]
+                from openai import OpenAI
+                client = OpenAI(
+                    base_url=server_config["base_url"],
+                    api_key=server_config["api_key"])
+                model_ids = [self.model_id_from_api_model(model) for model in client.models.list()]
+            else:
+                raise ValueError(f"Unknown model provider: {provider_key}")
+
+            self.model_refresh_queue.put((
+                provider_key,
+                self.deduplicate_models(model_ids),
+                None,
+                provider_config))
+        except ImportError as exc:
+            self.model_refresh_queue.put((
+                provider_key,
+                [],
+                f"Required SDK is not installed: {exc}",
+                provider_config))
+        except Exception as exc:
+            self.model_refresh_queue.put((provider_key, [], str(exc), provider_config))
+
+    def poll_model_refresh_results(self):
+        try:
+            while True:
+                result = self.model_refresh_queue.get_nowait()
+                self.finish_model_refresh(*result)
+        except queue.Empty:
+            pass
+
+        if self.model_refresh_in_progress:
+            self.model_refresh_poll_after_id = self.app.after(50, self.poll_model_refresh_results)
+        else:
+            self.model_refresh_poll_after_id = None
+
+    def model_refresh_config_is_current(self, provider_key, provider_config):
+        current_config = self.get_provider_config()
+        if provider_key == "openai":
+            return (
+                provider_config["openai_api_key"] == current_config["openai_api_key"]
+                and provider_config["openai_org_id"] == current_config["openai_org_id"])
+        if provider_key == "anthropic":
+            return provider_config["anthropic_api_key"] == current_config["anthropic_api_key"]
+        if provider_key == "google":
+            return provider_config["google_api_key"] == current_config["google_api_key"]
+        if provider_key.startswith("custom_server_"):
+            index = int(provider_key.rsplit("_", 1)[1])
+            return (
+                index < len(current_config["custom_servers"])
+                and provider_config["custom_servers"][index] == current_config["custom_servers"][index])
+        return False
+
+    def finish_model_refresh(self, provider_key, model_ids, error, provider_config):
+        self.model_refresh_in_progress.discard(provider_key)
+        button = self.model_refresh_buttons.get(provider_key)
+        if button is not None:
+            try:
+                button.configure(state="normal", text="Get")
+            except tk.TclError:
+                pass
+
+        if not self.model_refresh_config_is_current(provider_key, provider_config):
+            return
+        if error:
+            self.show_error_popup(f"Could not update {provider_key} models:\n\n{error}")
+            return
+        if not model_ids:
+            self.show_error_popup(f"Could not update {provider_key} models: the API returned no model IDs.")
+            return
+
+        if provider_key == "openai":
+            self.openai_models_var.set(", ".join(model_ids))
+        elif provider_key == "anthropic":
+            self.anthropic_models_var.set(", ".join(model_ids))
+        elif provider_key == "google":
+            self.google_models_var.set(", ".join(model_ids))
+        else:
+            index = int(provider_key.rsplit("_", 1)[1])
+            if index < len(self.custom_servers):
+                self.custom_servers[index].models_var.set(", ".join(model_ids))
+
+        self.update_model_lists_from_variables()
+        self.update_models_dropdown()
+        self.save_api_key()
 
     def start_provider_client_initialization(self):
+        self.provider_initialization_after_id = None
         provider_config = self.get_provider_config()
         self.provider_client_result_queue = queue.Queue()
         Thread(
@@ -551,9 +762,9 @@ class ChatWindow:
         # send request
         def request_thread():
             model_name = self.model_var.get()
-            if model_name in ANTHROPIC_MODELS:
+            if model_name in self.anthropic_models:
                 self.stream_anthropic_model_output(messages, anthropic_system_message)
-            elif model_name in GOOGLE_MODELS:
+            elif model_name in self.google_models:
                 google_contents, google_config = convert_messages_for_google(messages)
                 self.stream_google_model_output(google_contents, google_config)
             else:
@@ -614,7 +825,7 @@ class ChatWindow:
 
     def stream_openai_model_output(self, messages):
         async def streaming_chat_completion():
-            if self.model_var.get() in OPENAI_MODELS:
+            if self.model_var.get() in self.openai_models:
                 streaming_client = self.openai_aclient
                 if not streaming_client:
                     self.show_error_popup(self.get_provider_initialization_error(
@@ -814,23 +1025,21 @@ class ChatWindow:
             menu.add_command(label=file, command=lambda value=file: self.chat_filename_var.set(value))
 
     def update_models_dropdown(self):
-        # Update the model dropdown menu with available models
         current_model = self.model_var.get()
-        # Keep configured providers visible while their clients are loading or
-        # when construction failed. Otherwise a transient SDK/configuration
-        # problem makes the model list disappear and hides the useful error.
-        anthropic_models = ANTHROPIC_MODELS if (
-            self.anthropic_client is not None or self.anthropic_apikey_var.get().strip()
-        ) else []
-        google_models = GOOGLE_MODELS if (
-            self.google_client is not None or self.google_apikey_var.get().strip()
-        ) else []
-        openai_models = OPENAI_MODELS if (
-            self.openai_client is not None or self.openai_apikey_var.get().strip()
-        ) else []
-        custom_models = [model for server in self.custom_servers for model in server.models]
-        possible_models = [*openai_models, *anthropic_models, *google_models, *custom_models]
+        model_groups = []
+        if self.openai_client is not None or self.openai_apikey_var.get().strip():
+            model_groups.append(("OpenAI", self.openai_models))
+        if self.anthropic_client is not None or self.anthropic_apikey_var.get().strip():
+            model_groups.append(("Anthropic", self.anthropic_models))
+        if self.google_client is not None or self.google_apikey_var.get().strip():
+            model_groups.append(("Google", self.google_models))
+        for index, server in enumerate(self.custom_servers):
+            if server.models:
+                model_groups.append((f"Custom Server {index + 1}", server.models))
+
+        possible_models = [model for _, models in model_groups for model in models]
         if current_model and current_model not in possible_models:
+            model_groups.insert(0, ("Current model", [current_model]))
             possible_models.insert(0, current_model)
         if hasattr(self, "model_dropdown"):
             self.model_dropdown.destroy()
@@ -841,21 +1050,58 @@ class ChatWindow:
         self.model_settings_button = ttk.Button(self.main_frame, text="⚙", width=3, command=self.toggle_model_settings_window)
         self.model_settings_button.grid(row=0, column=8, sticky="nw", padx=(4, 0))
         ToolTip(self.model_settings_button, "Model settings")
-        # add separators to the dropdown menu
+
         dropdown_menu = self.model_dropdown['menu']
-        sep = -1
-        if openai_models:
-            sep+=len(openai_models)+1
-            dropdown_menu.insert_separator(sep)
-        if anthropic_models:
-            sep+=len(anthropic_models)+1
-            dropdown_menu.insert_separator(sep)
-        if google_models:
-            sep+=len(google_models)+1
-            dropdown_menu.insert_separator(sep)
-        for server in self.custom_servers:
-            sep += len(server.models)+1
-            dropdown_menu.insert_separator(sep)
+        dropdown_menu.delete(0, "end")
+        all_models = [model for _, models in model_groups for model in models]
+        model_name_width = max((len(model) for model in all_models), default=12)
+        for group_index, (group_name, models) in enumerate(model_groups):
+            if group_index:
+                dropdown_menu.add_separator()
+            dropdown_menu.add_command(
+                label=group_name,
+                state="disabled",
+                font="TkFixedFont")
+            if group_index == 0:
+                dropdown_menu.add_command(
+                    label=self.format_model_columns_header(model_name_width),
+                    state="disabled",
+                    font="TkFixedFont")
+            for model in models:
+                dropdown_menu.add_radiobutton(
+                    label=self.format_model_dropdown_label(
+                        model, model_name_width),
+                    variable=self.model_var,
+                    value=model,
+                    font="TkFixedFont")
+
+    @staticmethod
+    def format_model_price(price):
+        amount = price * 1000
+        if amount >= 100:
+            formatted_price = "$" + f"{round(amount):.0f}"
+        else:
+            formatted_price = "$" + f"{amount:.2f}"
+        if formatted_price.endswith(".00"):
+            formatted_price = formatted_price[:-3]
+        return formatted_price
+
+    def format_model_columns_header(self, model_name_width):
+        return f"{'':<{model_name_width + 1}}{'in':<6}{'out':<6}"
+
+    def format_model_dropdown_label(self, model, model_name_width=None):
+        model_name_width = model_name_width or len(model)
+        model_info = MODEL_INFO.get(model)
+        if not model_info:
+            return model
+        input_price = model_info.get("input_price")
+        output_price = model_info.get("output_price")
+        if input_price is None or output_price is None:
+            return model
+        return (
+            f"{model:<{model_name_width}} "
+            f"{self.format_model_price(input_price):<6}"
+            f"{self.format_model_price(output_price):<6}")
 
     def load_chat_history(self):
         filename = self.chat_filename_var.get()
@@ -1282,6 +1528,7 @@ class ChatWindow:
             self.max_len_entry_var.set(self.max_length_var.get())
 
     def on_close(self):
+        self.save_api_key()
         # Generate a timestamp string with the format "YYYYMMDD_HHMMSS"
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         # Generate a random 6-character alphanumeric ID
@@ -1353,6 +1600,7 @@ class ChatWindow:
         num_output_tokens = self.max_length_var.get()
         total_tokens = num_input_tokens + num_output_tokens
         model = self.model_var.get()
+        model_info = MODEL_INFO.get(model)
 
         # Calculate input and output costs for non-vision models
         input_cost = MODEL_INFO[model]["input_price"] * num_input_tokens / 1000 if model in MODEL_INFO else 0
@@ -1395,29 +1643,54 @@ class ChatWindow:
         messagebox.showinfo("Token Count and Cost", f"Number of tokens: {total_tokens} (Input: {num_input_tokens}, Output: {num_output_tokens})\n{cost_message}")
 
     def on_config_changed(self, *args):
-        self.save_api_key()
+        variable_name = args[0] if args else ""
+        self.update_model_lists_from_variables()
+        self.schedule_model_dropdown_update()
+        self.schedule_settings_save()
+
+        provider_variables = {
+            str(self.openai_apikey_var),
+            str(self.openai_orgid_var),
+            str(self.anthropic_apikey_var),
+            str(self.google_apikey_var),
+        }
+        provider_variables.update(str(server.baseurl_var) for server in self.custom_servers)
+        provider_variables.update(str(server.apikey_var) for server in self.custom_servers)
+        if variable_name in provider_variables:
+            self.schedule_provider_initialization()
 
     def save_api_key(self):
+        if self.settings_save_after_id is not None:
+            try:
+                self.app.after_cancel(self.settings_save_after_id)
+            except tk.TclError:
+                pass
+        self.settings_save_after_id = None
+        self.update_model_lists_from_variables()
+
+        for section in ("openai", "anthropic", "google", "app"):
+            if not self.config.has_section(section):
+                self.config.add_section(section)
+
         self.config.set("openai", "api_key", self.openai_apikey_var.get())
         self.config.set("openai", "organization", self.openai_orgid_var.get())
-        self.setup_openai_client()
+        self.config.set("openai", "models", ", ".join(self.openai_models))
         self.config.set("anthropic", "api_key", self.anthropic_apikey_var.get())
-        self.setup_anthropic_client()
+        self.config.set("anthropic", "models", ", ".join(self.anthropic_models))
         self.config.set("google", "api_key", self.google_apikey_var.get())
-        self.setup_google_client()
+        self.config.set("google", "models", ", ".join(self.google_models))
+
+        for section in list(self.config.sections()):
+            if section.startswith("custom_server_"):
+                self.config.remove_section(section)
         for i, custom_server in enumerate(self.custom_servers):
-            if not self.config.has_section(f"custom_server_{i}"):
-                self.config.add_section(f"custom_server_{i}")
-            if custom_server.baseurl_var.get() != "":
-                custom_server.update_client()
-                self.config.set(f"custom_server_{i}", "base_url", str(custom_server.baseurl_var.get()))
-                self.config.set(f"custom_server_{i}", "api_key", str(custom_server.apikey_var.get()))
-            if custom_server.models_var.get() != "":
-                custom_server.update_models()
-                self.config.set(f"custom_server_{i}", "models", custom_server.models_var.get())
+            section = f"custom_server_{i}"
+            self.config.add_section(section)
+            self.config.set(section, "base_url", custom_server.baseurl_var.get())
+            self.config.set(section, "api_key", custom_server.apikey_var.get())
+            self.config.set(section, "models", ", ".join(custom_server.models))
 
         self.config.set("app", "file_naming_model", self.file_naming_model_var.get())
-        self.update_models_dropdown()
 
         with open("config.ini", "w") as config_file:
             self.config.write(config_file)
@@ -1491,111 +1764,234 @@ class ChatWindow:
         temp_button.destroy()
         return default_bg_color
     
-    def add_new_custom_server(self):
-        new_custom_server = CustomServer("", "", "", [], on_config_changed=lambda *args: self.on_config_changed())
-        self.custom_servers.append(new_custom_server)
-        self.save_api_key()
-        self.toggle_settings_window()
-        self.toggle_settings_window()
-    def remove_last_custom_server(self):
-        if len(self.custom_servers) > 0:
-            self.config.remove_section(f"custom_server_{len(self.custom_servers)-1}")
-            self.config.write(open("config.ini", "w"))
-            self.custom_servers.pop()
-        self.save_api_key()
-        self.toggle_settings_window()
+    def create_undoable_entry(self, parent, variable, width=60):
+        entry = ttk.Entry(parent, textvariable=variable, width=width)
+        entry._settings_variable = variable
+        entry._settings_undo_history = []
+        entry._settings_undo_last_value = variable.get()
+        entry._settings_undo_suppressed = False
+
+        def record_undo(*_):
+            current_value = variable.get()
+            if entry._settings_undo_suppressed:
+                entry._settings_undo_last_value = current_value
+                return
+            if current_value != entry._settings_undo_last_value:
+                entry._settings_undo_history.append(entry._settings_undo_last_value)
+                entry._settings_undo_last_value = current_value
+
+        entry._settings_undo_trace_id = variable.trace_add("write", record_undo)
+        self.settings_undo_traces.append((variable, entry._settings_undo_trace_id))
+        entry.bind("<Control-z>", self.undo_entry)
+        entry.bind("<Control-Z>", self.undo_entry)
+        return entry
+
+    def clear_settings_undo_traces(self):
+        for variable, trace_id in self.settings_undo_traces:
+            try:
+                variable.trace_remove("write", trace_id)
+            except tk.TclError:
+                pass
+        self.settings_undo_traces.clear()
+
+    @staticmethod
+    def undo_entry(event):
+        entry = event.widget
+        history = getattr(entry, "_settings_undo_history", None)
+        variable = getattr(entry, "_settings_variable", None)
+        if history and variable is not None:
+            previous_value = history.pop()
+            entry._settings_undo_suppressed = True
+            variable.set(previous_value)
+            entry._settings_undo_last_value = previous_value
+            entry._settings_undo_suppressed = False
+            entry.icursor(tk.END)
+            return "break"
+        try:
+            entry.edit_undo()
+        except tk.TclError:
+            pass
+        return "break"
+
+    def add_settings_field(self, parent, row, label, variable, width=60):
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=3)
+        entry = self.create_undoable_entry(parent, variable, width)
+        entry.grid(row=row, column=1, columnspan=2, sticky="ew", pady=3)
+        return entry
+
+    def add_model_settings_row(self, parent, row, provider_key, models_var):
+        refresh_button = ttk.Button(
+            parent,
+            text="Get",
+            width=4,
+            command=lambda key=provider_key: self.refresh_models(key))
+        refresh_button.grid(row=row, column=0, sticky="w", padx=(0, 8), pady=3)
+        self.model_refresh_buttons[provider_key] = refresh_button
+        ttk.Label(parent, text="Models (comma-separated):").grid(
+            row=row, column=1, sticky="w", padx=(0, 8), pady=3)
+        entry = self.create_undoable_entry(parent, models_var)
+        entry.grid(row=row, column=2, sticky="ew", pady=3)
+        return entry
+
+    def rebuild_settings_window(self):
+        if self.settings_window is None:
+            return
+        self.settings_window.destroy()
+        self.settings_window = None
+        self.settings_frame = None
+        self.clear_settings_undo_traces()
         self.toggle_settings_window()
 
+    def add_new_custom_server(self):
+        new_custom_server = CustomServer(
+            "", "", "", [],
+            on_config_changed=lambda *args: self.on_config_changed(*args),
+            initialize_client=False)
+        self.custom_servers.append(new_custom_server)
+        self.save_api_key()
+        self.update_models_dropdown()
+        self.start_provider_client_initialization()
+        self.rebuild_settings_window()
+
+    def remove_custom_server(self, index):
+        if index < 0 or index >= len(self.custom_servers):
+            return
+        if not messagebox.askyesno(
+                "Remove custom server",
+                f"Remove Custom Server {index + 1}?",
+                parent=self.settings_window):
+            return
+
+        self.custom_servers.pop(index)
+        self.save_api_key()
+        self.update_models_dropdown()
+        self.start_provider_client_initialization()
+        self.rebuild_settings_window()
+
     def toggle_settings_window(self):
-        # If the settings window already exists, close it and set our settings window to None
         if self.settings_window is not None:
             self.settings_window.destroy()
             self.settings_window = None
+            self.settings_frame = None
+            self.model_refresh_buttons = {}
+            self.clear_settings_undo_traces()
             return
 
+        self.model_refresh_buttons = {}
         self.settings_window = tk.Toplevel(self.app)
         self.settings_window.title("Settings")
-        self.settings_frame = ttk.Frame(self.settings_window, padding="3")
-        self.settings_frame.grid(row=0, column=0, sticky="new")
+        self.settings_window.columnconfigure(0, weight=1)
+        self.settings_frame = ttk.Frame(self.settings_window, padding=10)
+        self.settings_frame.grid(row=0, column=0, sticky="nsew")
+        self.settings_frame.columnconfigure(0, weight=1)
 
-        # Create a Checkbutton widget for dark mode toggle
         self.dark_mode_var.set(self.load_dark_mode_state())
-        dark_mode_checkbutton = ttk.Checkbutton(self.settings_frame, text="Dark mode", variable=self.dark_mode_var, command=self.toggle_dark_mode)
-        dark_mode_checkbutton.grid(row=0, column=0, columnspan=2, padx=10, pady=10, sticky="w")
-        self.toggle_dark_mode()
+        dark_mode_checkbutton = ttk.Checkbutton(
+            self.settings_frame,
+            text="Dark mode",
+            variable=self.dark_mode_var,
+            command=self.toggle_dark_mode)
+        dark_mode_checkbutton.grid(row=0, column=0, sticky="w", pady=(0, 8))
 
-        # Add API key / Org ID configurations
-        ttk.Label(self.settings_frame, text="OpenAI API Key:").grid(row=1, column=0, sticky="e")
-        openai_apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.openai_apikey_var, width=60)
-        openai_apikey_entry.grid(row=1, column=1, sticky="e")
+        openai_frame = ttk.LabelFrame(
+            self.settings_frame, text="OpenAI", padding=8)
+        openai_frame.grid(row=1, column=0, sticky="ew", pady=4)
+        openai_frame.columnconfigure(2, weight=1)
+        openai_apikey_entry = self.add_settings_field(
+            openai_frame, 0, "API key:", self.openai_apikey_var)
+        self.add_settings_field(
+            openai_frame, 1, "Organization ID:", self.openai_orgid_var)
+        self.add_model_settings_row(
+            openai_frame, 2, "openai", self.openai_models_var)
+        self.add_settings_field(
+            openai_frame, 3, "File naming model:", self.file_naming_model_var)
 
-        ttk.Label(self.settings_frame, text="OpenAI Org ID:").grid(row=2, column=0, sticky="e")
-        openai_orgid_entry = ttk.Entry(self.settings_frame, textvariable=self.openai_orgid_var, width=60)
-        openai_orgid_entry.grid(row=2, column=1, sticky="e")
+        anthropic_frame = ttk.LabelFrame(
+            self.settings_frame, text="Anthropic", padding=8)
+        anthropic_frame.grid(row=2, column=0, sticky="ew", pady=4)
+        anthropic_frame.columnconfigure(2, weight=1)
+        self.add_settings_field(
+            anthropic_frame, 0, "API key:", self.anthropic_apikey_var)
+        self.add_model_settings_row(
+            anthropic_frame, 1, "anthropic", self.anthropic_models_var)
 
-        # Add Anthropic API key configuration
-        ttk.Label(self.settings_frame, text="Anthropic API Key:").grid(row=3, column=0, sticky="e")
-        anthropic_apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.anthropic_apikey_var, width=60)
-        anthropic_apikey_entry.grid(row=3, column=1, sticky="e")
-        # Add Google API key configuration
-        ttk.Label(self.settings_frame, text="Google API Key:").grid(row=4, column=0, sticky="e")
-        google_apikey_entry = ttk.Entry(self.settings_frame, textvariable=self.google_apikey_var, width=60)
-        google_apikey_entry.grid(row=4, column=1, sticky="e")
+        google_frame = ttk.LabelFrame(
+            self.settings_frame, text="Google", padding=8)
+        google_frame.grid(row=3, column=0, sticky="ew", pady=4)
+        google_frame.columnconfigure(2, weight=1)
+        self.add_settings_field(
+            google_frame, 0, "API key:", self.google_apikey_var)
+        self.add_model_settings_row(
+            google_frame, 1, "google", self.google_models_var)
 
-        # Add file naming model configuration
-        ttk.Label(self.settings_frame, text="File Naming Model (OpenAI only):").grid(row=5, column=0, sticky="e")
-        file_naming_model_entry = ttk.Entry(self.settings_frame, textvariable=self.file_naming_model_var, width=60)
-        file_naming_model_entry.grid(row=5, column=1, sticky="e")
+        row = 4
+        for index, custom_server in enumerate(self.custom_servers):
+            custom_frame = ttk.LabelFrame(
+                self.settings_frame, text="", padding=8)
+            custom_frame.grid(row=row, column=0, sticky="ew", pady=4)
+            custom_frame.columnconfigure(2, weight=1)
 
-        # Add Custom Server configuration
-        cur_row = 6
-        for i, custom_server in enumerate(self.custom_servers):
-            ttk.Separator(self.settings_frame, orient='horizontal').grid(row=cur_row, column=0, columnspan=2, sticky="we", pady=10)
-            ttk.Label(self.settings_frame, text=f"Custom Server {i+1} Configuration").grid(row=cur_row+1, column=0, sticky="e")
-            ttk.Label(self.settings_frame, text="Base URL:").grid(row=cur_row+2, column=0, sticky="e")
-            custom_baseurl_entry = ttk.Entry(self.settings_frame, textvariable=custom_server.baseurl_var, width=60)
-            custom_baseurl_entry.grid(row=cur_row+2, column=1, sticky="e")
-            ttk.Label(self.settings_frame, text="API Key:").grid(row=cur_row+3, column=0, sticky="e")
-            custom_apikey_entry = ttk.Entry(self.settings_frame, textvariable=custom_server.apikey_var, width=60)
-            custom_apikey_entry.grid(row=cur_row+3, column=1, sticky="e")
-            ttk.Label(self.settings_frame, text="Models (comma-separated):").grid(row=cur_row+4, column=0, sticky="e")
-            custom_models_entry = ttk.Entry(self.settings_frame, textvariable=custom_server.models_var, width=60)
-            custom_models_entry.grid(row=cur_row+4, column=1, sticky="e")
-            cur_row += 5
-        
-        # add a button to remove the last custom server
-        remove_custom_server_button = ttk.Button(self.settings_frame, text="Remove Last Custom Server", command=self.remove_last_custom_server)
-        remove_custom_server_button.grid(row=cur_row+1, column=1, columnspan=1, sticky="e")
-        ttk.Separator(self.settings_frame, orient='horizontal').grid(row=cur_row+2, column=0, columnspan=2, sticky="we", pady=10)
-        # add a button to add a new custom server
-        add_custom_server_button = ttk.Button(self.settings_frame, text="Add Custom Server", command=self.add_new_custom_server)
-        add_custom_server_button.grid(row=cur_row+3, column=0, columnspan=1, sticky="w")
+            header = ttk.Frame(custom_frame)
+            header.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 4))
+            remove_button = ttk.Button(
+                header,
+                text="-",
+                width=2,
+                command=lambda server_index=index: self.remove_custom_server(server_index))
+            remove_button.grid(row=0, column=0, sticky="w", padx=(0, 6))
+            ttk.Label(
+                header,
+                text=f"Custom Server {index + 1} Configuration").grid(
+                    row=0, column=1, sticky="w")
 
-        # Add a button to close the popup
-        close_button = ttk.Button(self.settings_frame, text="Close", command=self.close_settings_window)
-        close_button.grid(row=100, column=0, columnspan=2, pady=10)
-        # Bind the on_popup_close function to the WM_DELETE_WINDOW protocol
+            self.add_settings_field(
+                custom_frame, 1, "Base URL:", custom_server.baseurl_var)
+            self.add_settings_field(
+                custom_frame, 2, "API key:", custom_server.apikey_var)
+            self.add_model_settings_row(
+                custom_frame,
+                3,
+                f"custom_server_{index}",
+                custom_server.models_var)
+            row += 1
+
+        ttk.Button(
+            self.settings_frame,
+            text="Add Custom Server",
+            command=self.add_new_custom_server).grid(
+                row=row, column=0, sticky="w", pady=(8, 0))
+        ttk.Button(
+            self.settings_frame,
+            text="Close",
+            command=self.close_settings_window).grid(
+                row=row, column=0, sticky="e", pady=(8, 0))
+
         self.settings_window.protocol("WM_DELETE_WINDOW", self.on_settings_window_close)
-        # Bind events for api/org clipboard prompts, only in Android
-        if(self.os_name == 'Android'):
-            openai_apikey_entry.bind("<Button-1>", lambda event, entry=openai_apikey_entry: self.prompt_paste_from_clipboard(event, entry))
-            openai_orgid_entry.bind("<Button-1>", lambda event, entry=openai_orgid_entry: self.prompt_paste_from_clipboard(event, entry))
+        if self.os_name == "Android":
+            openai_apikey_entry.bind(
+                "<Button-1>",
+                lambda event, entry=openai_apikey_entry:
+                self.prompt_paste_from_clipboard(event, entry))
             openai_apikey_entry.bind("<FocusOut>", self.update_previous_focused_widget)
-            openai_orgid_entry.bind("<FocusOut>", self.update_previous_focused_widget)
 
-        # Center the popup over the main window
+        self.toggle_dark_mode()
         self.center_popup_over_chat_window(self.settings_window, self.app)
-
         self.settings_window.focus_force()
 
     def on_settings_window_close(self):
         self.settings_window.destroy()
         self.settings_window = None
+        self.settings_frame = None
+        self.model_refresh_buttons = {}
+        self.clear_settings_undo_traces()
 
     def close_settings_window(self):
         if self.settings_window is not None:
             self.settings_window.destroy()
             self.settings_window = None
+            self.settings_frame = None
+            self.model_refresh_buttons = {}
+            self.clear_settings_undo_traces()
 
     def center_popup_over_chat_window(self, popup_window, main_window, x_offset=0, y_offset=0):
         main_window.update_idletasks()
